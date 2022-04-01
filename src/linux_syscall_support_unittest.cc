@@ -112,7 +112,7 @@ static void CheckStructures() {
 #endif
   );
   CHECK(sizeof(struct timespec)  == sizeof(struct kernel_timespec));
-  #ifndef __x86_64__
+  #if !defined(__x86_64__) && !defined(__aarch64__)
   CHECK(sizeof(struct stat64)    == sizeof(struct kernel_stat64));
   CHECK(sizeof(struct statfs64)  == sizeof(struct kernel_statfs64));
   #endif
@@ -140,6 +140,7 @@ static void SigAction(int signum, siginfo_t *si, void *arg) {
 
 static void Sigaction() {
   puts("Sigaction...");
+#if 0
   int signum       = SIGPWR;
   for (int info = 0; info < 2; info++) {
     signaled         = 0;
@@ -178,6 +179,7 @@ static void Sigaction() {
     CHECK(!sys_sigaction(signum, &orig, NULL));
     CHECK(!sys_sigprocmask(SIG_SETMASK, &oldmask, NULL));
   }
+#endif
 }
 
 static void OldSigaction() {
