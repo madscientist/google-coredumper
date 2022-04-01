@@ -140,12 +140,12 @@ static void SigAction(int signum, siginfo_t *si, void *arg) {
 
 static void Sigaction() {
   puts("Sigaction...");
-#if 0
+  const size_t kSigsetSize = sizeof(struct kernel_sigset_t);
   int signum       = SIGPWR;
   for (int info = 0; info < 2; info++) {
     signaled         = 0;
     struct kernel_sigaction sa = ZERO_SIGACT, old, orig;
-    CHECK(!sys_sigaction(signum, NULL, &orig));
+    CHECK(!sys_rt_sigaction(signum, NULL, &orig, kSigsetSize));
     if (info) {
       sa.sa_sigaction_ = SigAction;
     } else {
@@ -153,33 +153,32 @@ static void Sigaction() {
     }
     sa.sa_flags      = SA_RESETHAND | SA_RESTART | (info ? SA_SIGINFO : 0);
     CHECK(!sys_sigemptyset(&sa.sa_mask));
-    CHECK(!sys_sigaction(signum, &sa, &old));
+    CHECK(!sys_rt_sigaction(signum, &sa, &old, kSigsetSize));
     CHECK(!memcmp(&old, &orig, sizeof(struct kernel_sigaction)));
-    CHECK(!sys_sigaction(signum, NULL, &old));
+    CHECK(!sys_rt_sigaction(signum, NULL, &old, kSigsetSize));
     #if defined(__i386__) || defined(__x86_64__)
     old.sa_restorer  = sa.sa_restorer;
     old.sa_flags    &= ~SA_RESTORER;
     #endif
     CHECK(!memcmp(&old, &sa, sizeof(struct kernel_sigaction)));
     struct kernel_sigset_t pending;
-    CHECK(!sys_sigpending(&pending));
+    CHECK(!sys_rt_sigpending(&pending, kSigsetSize));
     CHECK(!sys_sigismember(&pending, signum));
     struct kernel_sigset_t mask, oldmask;
     CHECK(!sys_sigemptyset(&mask));
     CHECK(!sys_sigaddset(&mask, signum));
     CHECK(!sys_sigprocmask(SIG_BLOCK, &mask, &oldmask));
     CHECK(!sys_kill(sys_getpid(), signum));
-    CHECK(!sys_sigpending(&pending));
+    CHECK(!sys_rt_sigpending(&pending, kSigsetSize));
     CHECK(sys_sigismember(&pending, signum));
     CHECK(!signaled);
     CHECK(!sys_sigfillset(&mask));
     CHECK(!sys_sigdelset(&mask, signum));
-    CHECK(sys_sigsuspend(&mask) == -1);
+    CHECK(sys_rt_sigsuspend(&mask, kSigsetSize) == -1);
     CHECK(signaled == signum);
-    CHECK(!sys_sigaction(signum, &orig, NULL));
+    CHECK(!sys_rt_sigaction(signum, &orig, NULL, kSigsetSize));
     CHECK(!sys_sigprocmask(SIG_SETMASK, &oldmask, NULL));
   }
-#endif
 }
 
 static void OldSigaction() {
