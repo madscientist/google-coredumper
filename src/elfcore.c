@@ -1897,8 +1897,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   }
 
   /* scope */ {
-    int openmax  = sys_sysconf(_SC_OPEN_MAX);
-    int pagesize = sys_sysconf(_SC_PAGESIZE);
+    int openmax  = sysconf(_SC_OPEN_MAX);
+    int pagesize = sysconf(_SC_PAGESIZE);
     struct kernel_sigset_t old_signals, blocked_signals;
 
     const char *file_name =
