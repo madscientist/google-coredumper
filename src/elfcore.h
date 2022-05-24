@@ -41,7 +41,7 @@ extern "C" {
  * Porting to other related platforms should not be difficult.
  */
 #if (defined(__i386__) || defined(__x86_64__) || defined(__ARM_ARCH_3__) || \
-     defined(__mips__)) && defined(__linux)
+     defined(__mips__) || defined(__aarch64__)) && defined(__linux)
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -96,6 +96,13 @@ extern "C" {
     #define LR uregs[14]        /* Link register                             */
     long uregs[18];
   } arm_regs;
+#elif defined(__aarch64__)
+  typedef struct arm64_regs {     /* General purpose registers                 */
+    #define BP uregs[29]        /* Frame pointer                             */
+    #define LR uregs[30]        /* Link register                             */
+    #define SP uregs[31]        /* Stack pointer                             */
+    long uregs[32];
+  } arm64_regs;
 #elif defined(__mips__)
   typedef struct mips_regs {
     unsigned long pad[6];       /* Unused padding to match kernel structures */
@@ -237,6 +244,37 @@ extern "C" {
     struct arm_regs arm;
     int             errno_;
     pid_t           tid;
+  } Frame;
+  #define FRAME(f) Frame f;                                           \
+                   do {                                               \
+                     long cpsr;                                       \
+                     f.errno_ = errno;                                \
+                     f.tid    = sys_gettid();                         \
+                     __asm__ volatile(                                \
+                       "stmia %0, {r0-r15}\n" /* All integer regs   */\
+                       : : "r"(&f.arm) : "memory");                   \
+                     f.arm.uregs[16] = 0;                             \
+                     __asm__ volatile(                                \
+                       "mrs %0, cpsr\n"       /* Condition code reg */\
+                       : "=r"(cpsr));                                 \
+                     f.arm.uregs[17] = cpsr;                          \
+                   } while (0)
+  #define SET_FRAME(f,r)                                              \
+                     do {                                             \
+                       /* Don't override the FPU status register.   */\
+                       /* Use the value obtained from ptrace(). This*/\
+                       /* works, because our code does not perform  */\
+                       /* any FPU operations, itself.               */\
+                       long fps      = (f).arm.uregs[16];             \
+                       errno         = (f).errno_;                    \
+                       (r)           = (f).arm;                       \
+                       (r).uregs[16] = fps;                           \
+                     } while (0)
+#elif defined(__aarch64__) && defined(__GNUC__)
+  typedef struct Frame {
+    struct arm64_regs arm;
+    int               errno_;
+    pid_t             tid;
   } Frame;
   #define FRAME(f) Frame f;                                           \
                    do {                                               \
