@@ -101,7 +101,7 @@ extern "C" {
     #define BP uregs[29]        /* Frame pointer                             */
     #define LR uregs[30]        /* Link register                             */
     #define SP uregs[31]        /* Stack pointer                             */
-    long uregs[32];
+    uint64_t uregs[32];
   } arm64_regs;
 #elif defined(__mips__)
   typedef struct mips_regs {
@@ -282,7 +282,7 @@ extern "C" {
                      f.errno_ = errno;                                \
                      f.tid    = sys_gettid();                         \
                      __asm__ volatile(                                \
-                       "stmia %0, {r0-r15}\n" /* All integer regs   */\
+                       "stp x0, x1, [%0]\n"                           \
                        : : "r"(&f.arm) : "memory");                   \
                      f.arm.uregs[16] = 0;                             \
                      __asm__ volatile(                                \

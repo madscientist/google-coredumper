@@ -260,6 +260,8 @@ typedef struct core_user {      /* Ptrace returns this data for thread state */
   #define ELF_ARCH  EM_386
 #elif defined(__ARM_ARCH_3__)
   #define ELF_ARCH  EM_ARM
+#elif defined(__aarch64__)
+  #define ELF_ARCH  EM_AARCH64
 #elif defined(__mips__)
   #define ELF_ARCH  EM_MIPS
 #endif
