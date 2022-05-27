@@ -141,6 +141,25 @@ extern "C" {
     unsigned int   init_flag;
   } fpregs;
   #define regs arm_regs         /* General purpose registers                 */
+#elif defined(__aarch64__)
+  typedef struct fpxregs {      /* No extended FPU registers on ARM          */
+  } fpxregs;
+  typedef struct fpregs {       /* FPU registers                             */
+    struct fp_reg {
+      unsigned int sign1:1;
+      unsigned int unused:15;
+      unsigned int sign2:1;
+      unsigned int exponent:14;
+      unsigned int j:1;
+      unsigned int mantissa1:31;
+      unsigned int mantissa0:32;
+    } fpregs[8];
+    unsigned int   fpsr:32;
+    unsigned int   fpcr:32;
+    unsigned char  ftype[8];
+    unsigned int   init_flag;
+  } fpregs;
+  #define regs arm64_regs         /* General purpose registers                 */
 #elif defined(__mips__)
   typedef struct fpxregs {      /* No extended FPU registers on MIPS         */
   } fpxregs;
