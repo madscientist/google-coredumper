@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/syscall.h>
 #include <stdint.h>
 #include <errno.h>
 
@@ -24,7 +25,7 @@ typedef struct arm64_regs { /* General purpose registers                 */
                    do {                                               \
                      long cpsr;                                       \
                      f.errno_ = errno;                                \
-                     f.tid    = gettid();                             \
+                     f.tid    = syscall(SYS_gettid);                  \
                      __asm__ volatile(                                \
                        "stp x0, x1, [%0]\n"                           \
                        : : "r"(&f.arm) : "memory");                   \
@@ -56,7 +57,6 @@ int ListAllProcessThreads(void *frame, const char* file_name)
 int WriteCoreDump(const char *file_name)
 {
     FRAME(frame);
-
 }
 
 int main()
