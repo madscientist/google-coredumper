@@ -37,6 +37,8 @@
 extern "C" {
 #endif
 
+#define __ARCH_WANT_SYSCALL_DEPRECATED
+
 #include <elf.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -177,12 +179,13 @@ typedef struct elf_timeval {    /* Time value with microsecond resolution    */
 } elf_timeval;
 
 
-typedef struct elf_siginfo {    /* Information about signal (unused)         */
-  int32_t si_signo;             /* Signal number                             */
-  int32_t si_code;              /* Extra code                                */
-  int32_t si_errno;             /* Errno                                     */
-} elf_siginfo;
+// typedef struct elf_siginfo {    /* Information about signal (unused)         */
+//   int32_t si_signo;             /* Signal number                             */
+//   int32_t si_code;              /* Extra code                                */
+//   int32_t si_errno;             /* Errno                                     */
+// } elf_siginfo;
 
+typedef struct elf_siginfo elf_siginfo;
 
 typedef struct prstatus {       /* Information about thread; includes CPU reg*/
   elf_siginfo    pr_info;       /* Info associated with signal               */
@@ -1773,13 +1776,13 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     hasSSE = 0;
     #else
     memset(scratch, 0xFF, sizeof(scratch));
-    if (sys_ptrace(PTRACE_GETREGS, pids[i], scratch, scratch) == 0) {
+    if (sys_ptrace(PTRACE_GETREGSET, pids[i], scratch, scratch) == 0) {
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
       }
       memset(scratch, 0xFF, sizeof(scratch));
-      if (sys_ptrace(PTRACE_GETFPREGS, pids[i], scratch, scratch) == 0) {
+      if (sys_ptrace(PTRACE_GETFPXREGS, pids[i], scratch, scratch) == 0) {
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
         #if defined(__i386__) && !defined( __x86_64__)

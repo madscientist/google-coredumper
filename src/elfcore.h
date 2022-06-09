@@ -98,10 +98,7 @@ extern "C" {
   } arm_regs;
 #elif defined(__aarch64__)
   typedef struct arm64_regs {     /* General purpose registers                 */
-    #define BP uregs[29]        /* Frame pointer                             */
-    #define LR uregs[30]        /* Link register                             */
-    #define SP uregs[31]        /* Stack pointer                             */
-    uint64_t uregs[32];
+    uint64_t uregs[31];
   } arm64_regs;
 #elif defined(__mips__)
   typedef struct mips_regs {
@@ -276,30 +273,50 @@ extern "C" {
     int               errno_;
     pid_t             tid;
   } Frame;
-  #define FRAME(f) Frame f;                                           \
-                   do {                                               \
-                     long cpsr;                                       \
-                     f.errno_ = errno;                                \
-                     f.tid    = sys_gettid();                         \
-                     __asm__ volatile(                                \
-                       "stp x0, x1, [%0]\n"                           \
-                       : : "r"(&f.arm) : "memory");                   \
-                     f.arm.uregs[16] = 0;                             \
-                     __asm__ volatile(                                \
-                       "mrs %0, cpsr\n"       /* Condition code reg */\
-                       : "=r"(cpsr));                                 \
-                     f.arm.uregs[17] = cpsr;                          \
-                   } while (0)
+  #define FRAME(f) Frame f;                             \
+                    do {                                \
+                        f.errno_ = errno;               \
+                        f.tid    = sys_gettid();        \
+                        __asm__ volatile(               \
+                            "stp x0, x1, [%0]\n"        \
+                            "stp x2, x3, [%1]\n"        \
+                            "stp x4, x5, [%2]\n"        \
+                            "stp x6, x7, [%3]\n"        \
+                            "stp x8, x9, [%4]\n"        \
+                            "stp x10, x11, [%5]\n"      \
+                            "stp x12, x13, [%6]\n"      \
+                            "stp x14, x15, [%7]\n"      \
+                            "stp x16, x17, [%8]\n"      \
+                            "stp x18, x19, [%9]\n"      \
+                            "stp x20, x21, [%10]\n"     \
+                            "stp x22, x23, [%11]\n"     \
+                            "stp x24, x25, [%12]\n"     \
+                            "stp x26, x27, [%13]\n"     \
+                            "stp x28, x29, [%14]\n"     \
+                            "str x30, [%15]\n"          \
+                        :                               \
+                        : "r"(&f.arm.uregs[0]),         \
+                          "r"(&f.arm.uregs[2]),         \
+                          "r"(&f.arm.uregs[4]),         \
+                          "r"(&f.arm.uregs[6]),         \
+                          "r"(&f.arm.uregs[8]),         \
+                          "r"(&f.arm.uregs[10]),        \
+                          "r"(&f.arm.uregs[12]),        \
+                          "r"(&f.arm.uregs[14]),        \
+                          "r"(&f.arm.uregs[16]),        \
+                          "r"(&f.arm.uregs[18]),        \
+                          "r"(&f.arm.uregs[20]),        \
+                          "r"(&f.arm.uregs[22]),        \
+                          "r"(&f.arm.uregs[24]),        \
+                          "r"(&f.arm.uregs[26]),        \
+                          "r"(&f.arm.uregs[28]),        \
+                          "r"(&f.arm.uregs[30])         \
+                        : "memory");                    \
+                    } while (0)
   #define SET_FRAME(f,r)                                              \
                      do {                                             \
-                       /* Don't override the FPU status register.   */\
-                       /* Use the value obtained from ptrace(). This*/\
-                       /* works, because our code does not perform  */\
-                       /* any FPU operations, itself.               */\
-                       long fps      = (f).arm.uregs[16];             \
                        errno         = (f).errno_;                    \
                        (r)           = (f).arm;                       \
-                       (r).uregs[16] = fps;                           \
                      } while (0)
 #elif defined(__mips__) && defined(__GNUC__)
   typedef struct Frame {
