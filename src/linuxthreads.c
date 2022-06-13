@@ -125,7 +125,18 @@ static int local_clone (int (*fn)(void *), void *arg, ...) {
    * is being debugged. This is OK and the error code will be reported
    * correctly.
    */
-  return sys_clone(fn, (char *)&arg - 4096,
+  void* child_stack __attribute__ ((aligned (16))) = &arg;
+  debug_print("stack = %p\n", child_stack);
+  uintptr_t addr __attribute__ ((aligned (16))) = (uintptr_t)&arg;
+  uint align = 16;
+  debug_print("addr = 0x%x, &addr = %p, arg = %p, &arg = %p, addr %% 16 = 0x%x, arg %% 16 = 0x%x\n", addr, &addr, arg, &arg, addr % align, ((uint64_t)&arg) % align);
+  addr -= 4096;
+  debug_print("addr = 0x%x\n", addr);
+  if (addr % align != 0)
+    addr += align - addr % align;
+  debug_print("addr = 0x%x\n", addr);
+  errno = 0;
+  return sys_clone(fn, (void *)addr,
                    CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
 }
 
