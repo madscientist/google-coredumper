@@ -1789,6 +1789,50 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       SET_FRAME(*(Frame *)frame, thread_regs[i]);
     }
     hasSSE = 0;
+    #elif defined(__aarch64__)
+    memset(scratch, 0xFF, sizeof(scratch));
+    struct
+    {
+        void*   buf;
+        size_t  len;
+    } my_iovec = { scratch, sizeof(scratch)};
+    long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &my_iovec);
+debug_print("%s:%s:%d: rc = %d errno = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, ptrace_rc, errno);
+    if (ptrace_rc == 0) {
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+      memcpy(thread_regs + i, scratch, sizeof(struct regs));
+      if (main_pid == pids[i]) {
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+        SET_FRAME(*(Frame *)frame, thread_regs[i]);
+      }
+#if 0
+      memset(scratch, 0xFF, sizeof(scratch));
+      ptrace_rc = sys_ptrace(PTRACE_GETFPXREGS, pids[i], NT_PRXFPREG, &my_iovec);
+debug_print("%s:%s:%d: rc = %d errno = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, ptrace_rc, errno);
+      if (ptrace_rc == 0) {
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+        memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
+        memset(scratch, 0xFF, sizeof(scratch));
+        #if defined(__i386__) && !defined( __x86_64__)
+        /* Linux on x86-64 stores all FPU registers in the SSE structure     */
+        if (sys_ptrace(PTRACE_GETFPXREGS, pids[i], scratch, scratch) == 0) {
+          memcpy(thread_fpxregs + i, scratch, sizeof(struct fpxregs));
+        } else {
+          hasSSE = 0;
+        }
+        #else
+        hasSSE = 0;
+        #endif
+      } else {
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+        goto ptrace;
+      }
+#endif
+    } else {
+   ptrace: /* Oh, well, undo everything and get out of here                  */
+      ResumeAllProcessThreads(threads, pids);
+      goto error;
+    }
     #else
     memset(scratch, 0xFF, sizeof(scratch));
     if (sys_ptrace(PTRACE_GETREGS, pids[i], scratch, scratch) == 0) {
