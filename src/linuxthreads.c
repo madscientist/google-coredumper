@@ -53,6 +53,8 @@ extern "C" {
 #include "linux_syscall_support.h"
 #include "thread_lister.h"
 
+#include <stdio.h>
+
 #ifndef CLONE_UNTRACED
 #define CLONE_UNTRACED 0x00800000
 #endif
@@ -81,6 +83,15 @@ static char *local_itoa(char *buf, int i) {
   }
 }
 
+static void debug_print(char *fmt, ...)
+{
+#if 0
+   va_list arg_ptr;
+   va_start(arg_ptr, fmt);
+   vprintf(fmt, arg_ptr);
+   va_end(arg_ptr);
+#endif
+}
 
 /* Wrapper around clone() that runs "fn" on the same stack as the
  * caller! Unlike fork(), the cloned thread shares the same address space.
@@ -259,6 +270,8 @@ static void ListerThread(struct ListerParams *args) {
   struct kernel_stat marker_sb, proc_sb;
   stack_t            altstack;
 
+  debug_print("%s:%s:%d, &found_parent = %p\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, &found_parent);
+
   /* Create "marker" that we can use to detect threads sharing the same
    * address space and the same file handles. By setting the FD_CLOEXEC flag
    * we minimize the risk of misidentifying child processes as threads;
@@ -276,6 +289,7 @@ static void ListerThread(struct ListerParams *args) {
     if (proc >= 0)
       NO_INTR(sys_close(proc));
     sig_proc = proc = -1;
+  debug_print("%s:%s:%d: exit 1, failure\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     sys__exit(1);
   }
 
@@ -294,6 +308,7 @@ static void ListerThread(struct ListerParams *args) {
     goto failure;
   }
 
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Catch signals on an alternate pre-allocated stack. This way, we can
    * safely execute the signal handler even if we ran out of memory.
    */
@@ -311,6 +326,7 @@ static void ListerThread(struct ListerParams *args) {
    */
   sig_marker = marker;
   sig_proc   = -1;
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   for (sig = 0; sig < sizeof(sync_signals)/sizeof(*sync_signals); sig++) {
     struct kernel_sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -328,11 +344,15 @@ static void ListerThread(struct ListerParams *args) {
      * check there first, and then fall back on the older naming
      * convention if necessary.
      */
+  debug_print("%s:%s:%d: proc_path = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, *proc_path);
     if ((sig_proc = proc = c_open(*proc_path, O_RDONLY|O_DIRECTORY, 0)) < 0) {
-      if (*++proc_path != NULL)
+      if (*++proc_path != NULL) {
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         continue;
+      }
       goto failure;
     }
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     if (sys_fstat(proc, &proc_sb) < 0)
       goto failure;
 
@@ -350,6 +370,7 @@ static void ListerThread(struct ListerParams *args) {
     if (max_threads < proc_sb.st_nlink + 100)
       max_threads = proc_sb.st_nlink + 100;
 
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     /* scope */ {
       pid_t pids[max_threads];
       int   added_entries = 0;
@@ -360,6 +381,7 @@ static void ListerThread(struct ListerParams *args) {
         char buf[4096];
         ssize_t nbytes = sys_getdents(proc, (struct kernel_dirent *)buf,
                                       sizeof(buf));
+  debug_print("%s:%s:%d: nbytes = %ld, proc = %d, proc_path = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, nbytes, proc, *proc_path);
         if (nbytes < 0)
           goto failure;
         else if (nbytes == 0) {
@@ -373,6 +395,7 @@ static void ListerThread(struct ListerParams *args) {
             sys_lseek(proc, 0, SEEK_SET);
             continue;
           }
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           break;
         }
         for (entry = (struct kernel_dirent *)buf;
@@ -382,6 +405,7 @@ static void ListerThread(struct ListerParams *args) {
             const char *ptr = entry->d_name;
             pid_t pid;
 
+  debug_print("%s:%s:%d: ptr = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, ptr);
             /* Some kernels hide threads by preceding the pid with a '.'     */
             if (*ptr == '.')
               ptr++;
@@ -467,6 +491,7 @@ static void ListerThread(struct ListerParams *args) {
         next_entry:;
         }
       }
+  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       NO_INTR(sys_close(proc));
       sig_proc = proc = -1;
 
@@ -484,6 +509,7 @@ static void ListerThread(struct ListerParams *args) {
          */
         if (!found_parent) {
           ResumeAllProcessThreads(num_threads, pids);
+  debug_print("%s:%s:%d: exit 3\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           sys__exit(3);
         }
 
@@ -493,6 +519,7 @@ static void ListerThread(struct ListerParams *args) {
         args->result = args->callback(args->parameter, num_threads,
                                       pids, args->ap);
         args->err = errno;
+  debug_print("%s:%s:%d: callback err = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
 
         /* Callback should have resumed threads, but better safe than sorry  */
         if (ResumeAllProcessThreads(num_threads, pids)) {
@@ -501,6 +528,7 @@ static void ListerThread(struct ListerParams *args) {
           args->result = -1;
         }
 
+  debug_print("%s:%s:%d: exit 0\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         sys__exit(0);
       }
     detach_threads:
@@ -513,7 +541,6 @@ static void ListerThread(struct ListerParams *args) {
     }
   }
 }
-
 
 /* This function gets the list of all linux threads of the current process
  * passes them to the 'callback' along with the 'parameter' pointer; at the
@@ -537,11 +564,13 @@ static void ListerThread(struct ListerParams *args) {
 int ListAllProcessThreads(void *parameter,
                           ListAllProcessThreadsCallBack callback, ...) {
   char                   altstack_mem[ALT_STACKSIZE];
+//   struct ListerParams    args __attribute__ ((aligned (16)));
   struct ListerParams    args;
   pid_t                  clone_pid;
   int                    dumpable = 1, sig;
   struct kernel_sigset_t sig_blocked, sig_old;
 
+  debug_print("%s: &arg = %p, altstack = %p\n", __PRETTY_FUNCTION__, &args, &(altstack_mem[MINSIGSTKSZ]));
   va_start(args.ap, callback);
 
   /* If we are short on virtual memory, initializing the alternate stack
@@ -615,37 +644,49 @@ int ListAllProcessThreads(void *parameter,
     sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
 
     if (clone_pid >= 0) {
+ debug_print("%s:%s:%d: parent\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+
       int status, rc;
-      while ((rc = sys_waitpid(clone_pid, &status, __WALL)) < 0 &&
-             ERRNO == EINTR) {
+      while ((rc = sys_waitpid(clone_pid, &status, __WALL)) < 0 && ERRNO == EINTR) {
+  debug_print("%s: keep waiting: rc = %d, status = %d\n", __PRETTY_FUNCTION__, rc, status);
              /* Keep waiting                                                 */
       }
+//   debug_print("%s: done waiting: rc = %d, status = %d\n", __PRETTY_FUNCTION__, rc, status);
       if (rc < 0) {
         args.err = ERRNO;
         args.result = -1;
       } else if (WIFEXITED(status)) {
         switch (WEXITSTATUS(status)) {
-          case 0: break;             /* Normal process termination           */
+          case 0:
+  //debug_print("%s: exit status = 0, status = %d (0x%x)\n", __PRETTY_FUNCTION__, status, status);
+                  break;             /* Normal process termination           */
           case 2: args.err = EFAULT; /* Some fault (e.g. SIGSEGV) detected   */
                   args.result = -1;
+  //debug_print("%s: exit status = EFAULT %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, EFAULT, status, status);
                   break;
           case 3: args.err = EPERM;  /* Process is already being traced      */
                   args.result = -1;
+  //debug_print("%s: exit status = EPERM %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, EPERM, status, status);
                   break;
           default:args.err = ECHILD; /* Child died unexpectedly              */
                   args.result = -1;
+  //debug_print("%s: exit status = ECHILD %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, ECHILD, status, status);
                   break;
         }
       } else if (!WIFEXITED(status)) {
         args.err    = EFAULT;        /* Terminated due to an unhandled signal*/
         args.result = -1;
+  //debug_print("%s: exit status = EFAULT %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, EFAULT, status, status);
       }
     } else {
+ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       args.result = -1;
       args.err    = clone_errno;
+  //debug_print("%s: error = clone_errno %d\n", __PRETTY_FUNCTION__, clone_errno);
     }
   }
 
+ debug_print("%s:%s:%d result = %d, err = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, args.result, args.err);
   /* Restore the "dumpable" state of the process                             */
 failed:
   if (!dumpable)

@@ -313,6 +313,15 @@ namespace {
 #define ERRNO my_errno
 #endif
 
+static void debug_print(char *fmt, ...)
+{
+#if 1
+   va_list arg_ptr;
+   va_start(arg_ptr, fmt);
+   vprintf(fmt, arg_ptr);
+   va_end(arg_ptr);
+#endif
+}
 
 /* Re-runs fn until it doesn't cause EINTR
  */
@@ -1700,13 +1709,16 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       va_arg(ap, const struct CoreDumpParameters *);
 
   int (*callback_fn)(void*) = GetCoreDumpParameter(params, callback_fn);
+debug_print("%s:%s:%d: callback_fn = %p\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, callback_fn);
   if (callback_fn) {
     void *arg = GetCoreDumpParameter(params, callback_arg);
+debug_print("%s:%s:%d calling callback_fn\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     if (callback_fn(arg) != 0) {
       goto error;
     }
   }
 
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Get thread status                                                       */
   memset(puser,          0, sizeof(struct core_user));
   memset(thread_regs,    0, threads * sizeof(struct regs));
@@ -1715,9 +1727,10 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 
   /* Threads are already attached, read their registers now                  */
 #ifdef THREADS
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   for (i = 0; i < threads; i++) {
     char scratch[4096];
-    #ifdef __mips__
+    #if defined(__mips__)
     /* MIPS kernels do not support PTRACE_GETREGS, instead we have to call
      * PTRACE_PEEKUSER go retrieve individual CPU registers. The indices
      * for these registers do not exactly match with the order in the
@@ -1776,13 +1789,13 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     hasSSE = 0;
     #else
     memset(scratch, 0xFF, sizeof(scratch));
-    if (sys_ptrace(PTRACE_GETREGSET, pids[i], scratch, scratch) == 0) {
+    if (sys_ptrace(PTRACE_GETREGS, pids[i], scratch, scratch) == 0) {
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
       }
       memset(scratch, 0xFF, sizeof(scratch));
-      if (sys_ptrace(PTRACE_GETFPXREGS, pids[i], scratch, scratch) == 0) {
+      if (sys_ptrace(PTRACE_GETFPREGS, pids[i], scratch, scratch) == 0) {
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
         #if defined(__i386__) && !defined( __x86_64__)
@@ -1806,6 +1819,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     #endif
   }
 
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Get parent's CPU registers, and user data structure                     */
   {
     #ifndef __mips__
@@ -1814,6 +1828,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                  ((char *)&user) + i);
     }
 
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     /* Overwrite the regs from ptrace with the ones previously computed.  */
     memcpy(&user.regs, thread_regs, sizeof(struct regs));
     #else
@@ -1823,6 +1838,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 #endif
 
   /* Build the PRPSINFO data structure                                       */
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   memset(&prpsinfo, 0, sizeof(struct prpsinfo));
   prpsinfo.pr_sname = 'R';
   prpsinfo.pr_nice  = sys_getpriority(PRIO_PROCESS, 0);
@@ -1830,7 +1846,9 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   prpsinfo.pr_gid   = sys_getegid();
   prpsinfo.pr_pid   = main_pid;
   prpsinfo.pr_ppid  = sys_getppid();
-//   prpsinfo.pr_pgrp  = sys_getpgrp();
+  #if !defined(__aarch64__)
+  prpsinfo.pr_pgrp  = sys_getpgrp();
+  #endif
   prpsinfo.pr_sid   = sys_getsid(0);
   /* scope */ {
     char scratch[4096], *cmd = scratch, *ptr;
@@ -1860,6 +1878,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     }
   }
 
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Build the PRSTATUS data structure                                       */
   /* scope */ {
     int stat_fd;
@@ -1920,6 +1939,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     }
   }
 
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* scope */ {
     int openmax  = sysconf(_SC_OPEN_MAX);
     int pagesize = sysconf(_SC_PAGESIZE);
@@ -1944,6 +1964,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       GetCoreDumpParameter(params, note_count);
 
     if (selected_compressor != NULL) {
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       /* For now, assume that the core dump is uncompressed; we will later
        * override this setting, if we can find a suitable compressor program.
        */
@@ -1964,6 +1985,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
        * can do this by creating the pipe in the child and passing the
        * file handle back to the parent.
        */
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       if (sys_socketpair(AF_UNIX, SOCK_STREAM, 0, pair) >= 0) {
         /* Block signals prior to forking. Technically, POSIX requires
          * us to call pthread_sigmask(), if this is a threaded
@@ -1985,11 +2007,13 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         if ((rc = sys_fork()) == 0) {
           int  fds[2];
 
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           /* Create a pipe for communicating between processes. If
            * necessary, add a compressor to the pipeline.
            */
           if (CreatePipeline(fds, openmax, PATH, &compressors) < 0 ||
               (fds[0] < 0 && sys_pipe(fds) < 0)) {
+debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             sys__exit(1);
           }
 
@@ -2010,6 +2034,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
             cmsg                    = CMSG_FIRSTHDR(&msg);
             if (!cmsg) {
               /* This can't happen, but static analyzers still complain...   */
+debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
               sys__exit(1);
             }
             cmsg->cmsg_level        = SOL_SOCKET;
@@ -2018,10 +2043,12 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
             *(int *)CMSG_DATA(cmsg) = fds[0];
             while (sys_sendmsg(pair[1], &msg, 0) < 0) {
               if (errno != EINTR)
+debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
                 sys__exit(1);
             }
             while (sys_shutdown(pair[1], SHUT_RDWR) < 0) {
               if (errno != EINTR)
+debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
                 sys__exit(1);
             }
           }
@@ -2229,6 +2256,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   }
 
   ResumeAllProcessThreads(threads, pids);
+debug_print("%s:%s:%d fd\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   return fd;
 
 error:
@@ -2239,6 +2267,7 @@ error:
     errno = saved_errno;
   }
   ResumeAllProcessThreads(threads, pids);
+debug_print("%s:%s:%d exit -1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   return -1;
 }
 
