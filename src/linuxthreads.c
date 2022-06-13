@@ -59,7 +59,9 @@ extern "C" {
 #define CLONE_UNTRACED 0x00800000
 #endif
 
+#if defined (__aarch64__)
 const size_t kSigsetSize = sizeof(struct kernel_sigset_t);
+#endif
 
 /* Synchronous signals that should not be blocked while in the lister thread.
  */
@@ -125,19 +127,17 @@ static int local_clone (int (*fn)(void *), void *arg, ...) {
    * is being debugged. This is OK and the error code will be reported
    * correctly.
    */
-  void* child_stack __attribute__ ((aligned (16))) = &arg;
-  debug_print("stack = %p\n", child_stack);
-  uintptr_t addr __attribute__ ((aligned (16))) = (uintptr_t)&arg;
-  uint align = 16;
-  debug_print("addr = 0x%x, &addr = %p, arg = %p, &arg = %p, addr %% 16 = 0x%x, arg %% 16 = 0x%x\n", addr, &addr, arg, &arg, addr % align, ((uint64_t)&arg) % align);
-  addr -= 4096;
-  debug_print("addr = 0x%x\n", addr);
-  if (addr % align != 0)
-    addr += align - addr % align;
-  debug_print("addr = 0x%x\n", addr);
-  errno = 0;
-  return sys_clone(fn, (void *)addr,
+  #if defined (__aarch64__)
+  uintptr_t child_stack = ((uintptr_t)&arg - 4096);
+  const uint align = 16;
+  if (child_stack % align != 0)
+    child_stack += align - child_stack % align;
+  return sys_clone(fn, (void *)child_stack,
                    CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
+  #else
+  return sys_clone(fn, (char *)&arg - 4096,
+                   CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
+  #endif
 }
 
 
@@ -344,7 +344,11 @@ static void ListerThread(struct ListerParams *args) {
     sa.sa_sigaction_ = SignalHandler;
     sys_sigfillset(&sa.sa_mask);
     sa.sa_flags      = SA_ONSTACK|SA_SIGINFO|SA_RESETHAND;
+    #if defined (__aarch64__)
     sys_rt_sigaction(sync_signals[sig], &sa, (struct kernel_sigaction *)NULL, kSigsetSize);
+    #else
+    sys_sigaction(sync_signals[sig], &sa, (struct kernel_sigaction *)NULL);
+    #endif
   }
 
   /* Read process directories in /proc/...                                   */
@@ -575,7 +579,6 @@ static void ListerThread(struct ListerParams *args) {
 int ListAllProcessThreads(void *parameter,
                           ListAllProcessThreadsCallBack callback, ...) {
   char                   altstack_mem[ALT_STACKSIZE];
-//   struct ListerParams    args __attribute__ ((aligned (16)));
   struct ListerParams    args;
   pid_t                  clone_pid;
   int                    dumpable = 1, sig;
@@ -600,9 +603,15 @@ int ListAllProcessThreads(void *parameter,
   /* Make this process "dumpable". This is necessary in order to ptrace()
    * after having called setuid().
    */
+  #if defined (__aarch64__)
   dumpable = sys_prctl(PR_GET_DUMPABLE, 0, 0, 0, 0);
   if (!dumpable)
     sys_prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
+  #else
+  dumpable = sys_prctl(PR_GET_DUMPABLE, 0);
+  if (!dumpable)
+    sys_prctl(PR_SET_DUMPABLE, 1);
+  #endif
 
   /* Fill in argument block for dumper thread                                */
   args.result       = -1;
@@ -650,7 +659,11 @@ int ListAllProcessThreads(void *parameter,
 #ifndef PR_SET_PTRACER
 # define PR_SET_PTRACER 0x59616d61
 #endif
+    #if defined (__aarch64__)
     sys_prctl(PR_SET_PTRACER, clone_pid, 0, 0, 0);
+    #else
+    sys_prctl(PR_SET_PTRACER, clone_pid);
+    #endif
 
     sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
 
@@ -658,50 +671,52 @@ int ListAllProcessThreads(void *parameter,
  debug_print("%s:%s:%d: parent\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
 
       int status, rc;
+      #if defined (__aarch64__)
       while ((rc = sys_waitpid(clone_pid, &status, __WALL)) < 0 && ERRNO == EINTR) {
-  debug_print("%s: keep waiting: rc = %d, status = %d\n", __PRETTY_FUNCTION__, rc, status);
              /* Keep waiting                                                 */
       }
-//   debug_print("%s: done waiting: rc = %d, status = %d\n", __PRETTY_FUNCTION__, rc, status);
+      #else
+      while ((rc = sys0_waitpid(clone_pid, &status, __WALL)) < 0 &&
+             ERRNO == EINTR) {
+             /* Keep waiting                                                 */
+      }
+      #endif
       if (rc < 0) {
         args.err = ERRNO;
         args.result = -1;
       } else if (WIFEXITED(status)) {
         switch (WEXITSTATUS(status)) {
-          case 0:
-  //debug_print("%s: exit status = 0, status = %d (0x%x)\n", __PRETTY_FUNCTION__, status, status);
-                  break;             /* Normal process termination           */
+          case 0: break;             /* Normal process termination           */
           case 2: args.err = EFAULT; /* Some fault (e.g. SIGSEGV) detected   */
                   args.result = -1;
-  //debug_print("%s: exit status = EFAULT %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, EFAULT, status, status);
                   break;
           case 3: args.err = EPERM;  /* Process is already being traced      */
                   args.result = -1;
-  //debug_print("%s: exit status = EPERM %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, EPERM, status, status);
                   break;
           default:args.err = ECHILD; /* Child died unexpectedly              */
                   args.result = -1;
-  //debug_print("%s: exit status = ECHILD %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, ECHILD, status, status);
                   break;
         }
       } else if (!WIFEXITED(status)) {
         args.err    = EFAULT;        /* Terminated due to an unhandled signal*/
         args.result = -1;
-  //debug_print("%s: exit status = EFAULT %d, status = %d (0x%x)\n", __PRETTY_FUNCTION__, EFAULT, status, status);
       }
     } else {
- debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       args.result = -1;
       args.err    = clone_errno;
-  //debug_print("%s: error = clone_errno %d\n", __PRETTY_FUNCTION__, clone_errno);
     }
   }
 
  debug_print("%s:%s:%d result = %d, err = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, args.result, args.err);
   /* Restore the "dumpable" state of the process                             */
 failed:
+  #if defined (__aarch64__)
   if (!dumpable)
     sys_prctl(PR_SET_DUMPABLE, dumpable, 0, 0, 0);
+  #else
+  if (!dumpable)
+    sys_prctl(PR_SET_DUMPABLE, dumpable);
+  #endif
 
   va_end(args.ap);
 
