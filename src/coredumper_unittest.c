@@ -775,6 +775,7 @@ void TestCoreDump() {
     unlink(core_test);
 
     /* Check whether limits work correctly                                   */
+    puts("Check whether limits work correctly");
     rc = (loop ? MyWriteCoreDumpLimited : WriteCoreDumpLimited)(
            core_test, 0);
     assert(!rc);
