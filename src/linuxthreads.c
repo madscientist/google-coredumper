@@ -85,7 +85,7 @@ static char *local_itoa(char *buf, int i) {
 
 static void debug_print(char *fmt, ...)
 {
-#if 0
+#if 1
    va_list arg_ptr;
    va_start(arg_ptr, fmt);
    vprintf(fmt, arg_ptr);
