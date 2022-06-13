@@ -41,6 +41,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <stdio.h>
+
 #include "google/coredumper.h"
 #include "elfcore.h"
 #include "linux_syscall_support.h"

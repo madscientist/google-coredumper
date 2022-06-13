@@ -57,6 +57,8 @@ extern "C" {
 #include <sys/wait.h>
 #include <stdbool.h>
 
+#include <stdio.h>
+
 #include "google/coredumper.h"
 #include "linux_syscall_support.h"
 #include "linuxthreads.h"
