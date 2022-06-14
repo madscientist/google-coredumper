@@ -37,8 +37,6 @@
 extern "C" {
 #endif
 
-#define __ARCH_WANT_SYSCALL_DEPRECATED
-
 #include <elf.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -57,12 +55,12 @@ extern "C" {
 #include <sys/wait.h>
 #include <stdbool.h>
 
-#include <stdio.h>
-
 #include "google/coredumper.h"
 #include "linux_syscall_support.h"
 #include "linuxthreads.h"
 #include "thread_lister.h"
+
+#include <stdio.h>
 
 #ifndef CLONE_UNTRACED
 #define CLONE_UNTRACED 0x00800000
@@ -431,6 +429,7 @@ struct WriterFds {
  */
 static int PipeDone(void *f) {
   struct WriterFds *fds = (struct WriterFds *)f;
+debug_print("%s:%s:%d: fds->max_length = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, fds->max_length);
   return fds->max_length == 0;
 }
 
@@ -459,18 +458,23 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
   const unsigned char *buf = (const unsigned char *)void_buf;
   struct WriterFds *fds    = (struct WriterFds *)f;
   size_t len               = bytes;
+debug_print("%s:%s:%d: ENTER: fds->max_length = %ld, bytes = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, fds->max_length, bytes);
   while (fds->max_length > 0 && len > 0) {
+debug_print("%s:%s:%d: bytes = %ld, len = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, bytes, len);
     ssize_t rc;
     struct kernel_pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
                                       { fds->write_fd, POLLOUT, 0 } };
     int nfds = sys_poll(pfd, 2, -1);
 
+debug_print("%s:%s:%d: compressed_fd = %d, write_fd = %d, errno = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, fds->compressed_fd, fds->write_fd, errno);
+debug_print("%s:%s:%d: nfds = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, nfds);
     if (nfds < 0) {
       /* Abort on fatal unexpected I/O errors.                               */
       break;
     }
 
     if (nfds > 0 && (pfd[0].revents & POLLIN)) {
+debug_print("%s:%s:%d: Some compressed data has become available. Copy to output file\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       /* Some compressed data has become available. Copy to output file.     */
       char scratch[4096];
       for (;;) {
@@ -483,6 +487,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
         errno = -1;
 
         NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
+debug_print("%s:%s:%d: sys_read = %d, compressed_fd= %d, l = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc, fds->compressed_fd, l);
         if (rc < 0) {
           /* The file handle is set to be non-blocking, so we loop until
            * read() returns -1.
@@ -490,16 +495,22 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
           if (errno == EAGAIN) {
             break;
           }
+debug_print("%s:%s:%d: return rc = -1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           return -1;
         } else if (rc == 0) {
           fds->max_length = 0;
           break;
         }
+        ssize_t read_rc = rc;
         rc = c_write(fds->out_fd, scratch, rc, &errno);
+debug_print("%s:%s:%d: c_write = %d, out_fd = %d, length(rc) = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc, fds->out_fd, read_rc);
         if (rc <= 0) {
+debug_print("%s:%s:%d: return rc = -1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           return -1;
         }
+debug_print("%s:%s:%d: fds->max_length(%lu) - rc(%ld) = ", __FILE__, __PRETTY_FUNCTION__, __LINE__, fds->max_length, rc);
         fds->max_length -= rc;
+debug_print("%lu\n", fds->max_length);
       }
       nfds--;
     }
@@ -507,7 +518,9 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
       /* The compressor has consumed all previous data and is ready to
        * receive more.
        */
+debug_print("%s:%s:%d: The compressor has consumed all previous data and is ready to receive more.\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       NO_INTR(rc = sys_write(fds->write_fd, buf, len));
+debug_print("%s:%s:%d: rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc, fds->write_fd, len, errno, buf);
       if (rc < 0 && errno != EAGAIN) {
         return -1;
       }
@@ -515,6 +528,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
       len -= rc;
     }
   }
+debug_print("%s:%s:%d: bytes - len = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, bytes - len);
   return bytes - len;
 }
 
@@ -534,6 +548,7 @@ static int FlushPipe(struct WriterFds *fds) {
     }
     if (l > 0) {
       NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
+debug_print("%s:%s:%d: sys_read = %d, compressed_fd= %d, l = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc, fds->compressed_fd, l);
       if (rc < 0) {
         return -1;
       } else if (rc == 0) {
@@ -713,6 +728,7 @@ static void CountAUXV(size_t *pnum_auxv, size_t *pvdso_ehdr) {
     ssize_t nread;
     do {
       NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
+debug_print("%s:%s:%d: sys_read = %d, fd = %d, sizeof(auxv_t) = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, nread, fd, sizeof(auxv_t));
       if (sizeof(auxv_t) != nread)
         break;
       num_auxv++;
@@ -803,6 +819,7 @@ static int CreateElfCore(void *handle,
 
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
+debug_print("%s:%s:%d: open /proc/self/maps = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, io.fd);
   if (io.fd >= 0) {
     int i, ch;
     while ((ch = GetChar(&io)) >= 0) {
@@ -837,6 +854,7 @@ static int CreateElfCore(void *handle,
          * "^[0-9A-F]*-[0-9A-F]* [r-][w-][x-][p-] [0-9A-F]*.*$"
          * At the start of each iteration, ch contains the first character.
          */
+debug_print("%s:%s:%d: num_mappings = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, num_mappings);
         for (i = 0; i < num_mappings;) {
           static const char * const dev_zero = "/dev/zero";
           const char *dev = dev_zero;
@@ -1020,6 +1038,7 @@ static int CreateElfCore(void *handle,
         }
         NO_INTR(sys_close(io.fd));
 
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         if (vdso.address) {
           /* Sanity checks.                                                  */
           for (i = 0; i < num_mappings; i++) {
@@ -1039,6 +1058,7 @@ static int CreateElfCore(void *handle,
           }
         }
 
+debug_print("%s:%s:%d: Write out the ELF header\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         /* Write out the ELF header                                          */
         /* scope */ {
           Ehdr ehdr;
@@ -1072,11 +1092,14 @@ static int CreateElfCore(void *handle,
           ehdr.e_phentsize= sizeof(Phdr);
           ehdr.e_phnum    = num_mappings + num_extra_phdrs + 1;
           ehdr.e_shentsize= sizeof(Shdr);
-          if (writer(handle, &ehdr, sizeof(Ehdr)) != sizeof(Ehdr)) {
+          ssize_t written = writer(handle, &ehdr, sizeof(Ehdr));
+debug_print("%s:%s:%d: written = %ld sizeof(Ehdr) = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, written, sizeof(Ehdr));
+          if (written != sizeof(Ehdr)) {
             goto done;
           }
         }
 
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         /* Write program headers, starting with the PT_NOTE entry            */
         /* scope */ {
           Phdr   phdr;
@@ -1129,6 +1152,7 @@ static int CreateElfCore(void *handle,
             note_align    = 0;
           offset         += note_align;
 
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           /* If the option is set, remove the largest memory sections first
            * when limiting the size of the core dump.
            * If prioritize_max_length is zero, the prioritization option wasn't
@@ -1188,6 +1212,7 @@ static int CreateElfCore(void *handle,
             }
           }
 
+debug_print("%s:%s:%d: num_mappings = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, num_mappings);
           for (i = 0; i < num_mappings; i++) {
             offset       += filesz;
             filesz        = mappings[i].end_address -mappings[i].start_address;
@@ -1202,6 +1227,7 @@ static int CreateElfCore(void *handle,
               goto done;
             }
           }
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           if (vdso.ehdr) {
             Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
             for (i = 0; i < vdso.ehdr->e_phnum; i++) {
@@ -1219,6 +1245,7 @@ static int CreateElfCore(void *handle,
           }
         }
         /* Write note section                                                */
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         /* scope */ {
           Nhdr nhdr;
           memset(&nhdr, 0, sizeof(Nhdr));
@@ -1232,6 +1259,7 @@ static int CreateElfCore(void *handle,
             goto done;
           }
           if (user) {
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             nhdr.n_descsz   = sizeof(struct core_user);
             nhdr.n_type     = NT_PRXREG;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
@@ -1242,6 +1270,7 @@ static int CreateElfCore(void *handle,
             }
           }
           if (num_auxv) {
+debug_print("%s:%s:%d:\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             /* Dump entire auxv[] array as NT_AUXV note, to match what
              * kernel code in fs/binfmt_elf.c does.
              * Without this, gdb can't unwind through vdso on i686.
@@ -1262,16 +1291,20 @@ static int CreateElfCore(void *handle,
               ssize_t nread;
               auxv_t auxv;
               NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
+debug_print("%s:%s:%d: sys_read = %d, fd= %d, sizeof(auxv_t) = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, nread, fd, sizeof(auxv_t));
               if (nread != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
               }
-              if (writer(handle, &auxv, sizeof(auxv_t)) != sizeof(auxv_t)) {
+              int rc1 = writer(handle, &auxv, sizeof(auxv_t));
+debug_print("%s:%s:%d: writer = %d, handle = %p, sizeof(auxv_t) = %ld\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc1, handle, sizeof(auxv_t));
+              if (rc1 != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
               }
             }
           }
+debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           /* The order of threads in the output matters to gdb:
            * it assumes that the first one is the one that crashed.
            * Make it easier for the end-user to find crashing thread
@@ -1371,6 +1404,7 @@ static int CreateElfCore(void *handle,
   }
 
 done:
+debug_print("%s:%s:%d: done: rc = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc);
   if (is_done(handle)) {
     rc = 0;
   }
@@ -1379,6 +1413,7 @@ done:
     NO_INTR(sys_close(loopback[0]));
   if (loopback[1] >= 0)
     NO_INTR(sys_close(loopback[1]));
+debug_print("%s:%s:%d: return: rc = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc);
   return rc;
 }
 
@@ -1518,12 +1553,15 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
                           const struct CoredumperCompressor** compressors) {
   int saved_errno1 = 0;
 
+debug_print("%s:%s:%d: PATH = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, PATH);
   /* Create a pipe for communicating between processes                       */
   if (sys_pipe(fds) < 0)
     return -1;
 
+debug_print("%s:%s:%d: pipe[0] read from = %d, pipe[1] write to = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, fds[0], fds[1]);
   /* Find a suitable compressor program, if necessary                        */
   if (*compressors != NULL && (*compressors)->compressor != NULL) {
+debug_print("%s:%s:%d: compressor = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, (*compressors)->compressor);
     char stack[4096];
     struct CreateArgs args;
     pid_t comp_pid;
@@ -1539,6 +1577,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
         NO_INTR(sys_close(fds[0]));
         NO_INTR(sys_close(fds[1]));
         errno = saved_errno;
+debug_print("%s:%s:%d close pipe return -1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         return -1;
       }
     } else if (sys_pipe(args.zip_out) < 0) {
@@ -1550,6 +1589,10 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
         goto fail0;
       }
     }
+
+debug_print("%s:%s:%d: zip_in[0] read from = %d, zip_in[1] write to = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, args.zip_in[0], args.zip_in[1]);
+
+debug_print("%s:%s:%d: zip_out[0] read from = %d, zip_out[1] write to = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, args.zip_out[0], args.zip_out[1]);
 
     /* We use clone() here, instead of the more common fork(). This ensures
      * that the WriteCoreDump() code path never results in making a COW
@@ -1593,6 +1636,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
         NO_INTR(sys_close(args.zip_in[0]));
         NO_INTR(sys_close(args.zip_in[1]));
         errno = saved_errno2;
+debug_print("%s:%s:%d return -1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         return -1;
       }
     }
@@ -1622,6 +1666,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
       }
     }
   }
+debug_print("%s:%s:%d return 0\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   return 0;
 }
 
@@ -1639,6 +1684,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
 static inline int GetParentRegs(void *frame, regs *cpu, fpregs *fp,
                                 fpxregs *fpx, int *hasSSE) {
 #ifdef THREADS
+debug_print("%s:%s:%d THREADS return 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   return 1;
 #else
   int rc = 0;
@@ -1711,16 +1757,13 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       va_arg(ap, const struct CoreDumpParameters *);
 
   int (*callback_fn)(void*) = GetCoreDumpParameter(params, callback_fn);
-debug_print("%s:%s:%d: callback_fn = %p\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, callback_fn);
   if (callback_fn) {
     void *arg = GetCoreDumpParameter(params, callback_arg);
-debug_print("%s:%s:%d calling callback_fn\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     if (callback_fn(arg) != 0) {
       goto error;
     }
   }
 
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Get thread status                                                       */
   memset(puser,          0, sizeof(struct core_user));
   memset(thread_regs,    0, threads * sizeof(struct regs));
@@ -1729,7 +1772,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
 
   /* Threads are already attached, read their registers now                  */
 #ifdef THREADS
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   for (i = 0; i < threads; i++) {
     char scratch[4096];
     #if defined(__mips__)
@@ -1791,23 +1833,16 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     hasSSE = 0;
     #elif defined(__aarch64__)
     memset(scratch, 0xFF, sizeof(scratch));
-    struct
-    {
-        void*   buf;
-        size_t  len;
-    } my_iovec = { scratch, sizeof(scratch)};
-    long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &my_iovec);
-debug_print("%s:%s:%d: rc = %d errno = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, ptrace_rc, errno);
+    struct iovec scratch_iovec = { scratch, sizeof(scratch)};
+    long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
     if (ptrace_rc == 0) {
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
       if (main_pid == pids[i]) {
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
       }
 #if 0
       memset(scratch, 0xFF, sizeof(scratch));
-      ptrace_rc = sys_ptrace(PTRACE_GETFPXREGS, pids[i], NT_PRXFPREG, &my_iovec);
+      ptrace_rc = sys_ptrace(PTRACE_GETFPXREGS, pids[i], NT_PRXFPREG, &scratch_iovec);
 debug_print("%s:%s:%d: rc = %d errno = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, ptrace_rc, errno);
       if (ptrace_rc == 0) {
 debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
@@ -1865,7 +1900,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     #endif
   }
 
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Get parent's CPU registers, and user data structure                     */
   {
     #ifndef __mips__
@@ -1874,7 +1908,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
                  ((char *)&user) + i);
     }
 
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     /* Overwrite the regs from ptrace with the ones previously computed.  */
     memcpy(&user.regs, thread_regs, sizeof(struct regs));
     #else
@@ -1884,7 +1917,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
 #endif
 
   /* Build the PRPSINFO data structure                                       */
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   memset(&prpsinfo, 0, sizeof(struct prpsinfo));
   prpsinfo.pr_sname = 'R';
   prpsinfo.pr_nice  = sys_getpriority(PRIO_PROCESS, 0);
@@ -1924,7 +1956,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     }
   }
 
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* Build the PRSTATUS data structure                                       */
   /* scope */ {
     int stat_fd;
@@ -1985,16 +2016,21 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     }
   }
 
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   /* scope */ {
+    #if defined(__aarch64__)
     int openmax  = sysconf(_SC_OPEN_MAX);
     int pagesize = sysconf(_SC_PAGESIZE);
+    #else
+    int openmax  = sys_sysconf(_SC_OPEN_MAX);
+    int pagesize = sys_sysconf(_SC_PAGESIZE);
+    #endif
     struct kernel_sigset_t old_signals, blocked_signals;
 
     const char *file_name =
       va_arg(ap, const char *);
     size_t max_length =
       GetCoreDumpParameter(params, max_length);
+
     const char *PATH =
       va_arg(ap, const char *);
     const struct CoredumperCompressor *compressors =
@@ -2010,7 +2046,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       GetCoreDumpParameter(params, note_count);
 
     if (selected_compressor != NULL) {
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       /* For now, assume that the core dump is uncompressed; we will later
        * override this setting, if we can find a suitable compressor program.
        */
@@ -2021,6 +2056,7 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       }
     }
 
+debug_print("%s:%s:%d file_name = %p\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, file_name);
     if (file_name == NULL) {
       /* Create a file descriptor that can be used for reading data from
        * our child process. This is a little complicated because we need
@@ -2031,7 +2067,6 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
        * can do this by creating the pipe in the child and passing the
        * file handle back to the parent.
        */
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       if (sys_socketpair(AF_UNIX, SOCK_STREAM, 0, pair) >= 0) {
         /* Block signals prior to forking. Technically, POSIX requires
          * us to call pthread_sigmask(), if this is a threaded
@@ -2053,13 +2088,11 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         if ((rc = sys_fork()) == 0) {
           int  fds[2];
 
-debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           /* Create a pipe for communicating between processes. If
            * necessary, add a compressor to the pipeline.
            */
           if (CreatePipeline(fds, openmax, PATH, &compressors) < 0 ||
               (fds[0] < 0 && sys_pipe(fds) < 0)) {
-debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             sys__exit(1);
           }
 
@@ -2080,7 +2113,6 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             cmsg                    = CMSG_FIRSTHDR(&msg);
             if (!cmsg) {
               /* This can't happen, but static analyzers still complain...   */
-debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
               sys__exit(1);
             }
             cmsg->cmsg_level        = SOL_SOCKET;
@@ -2089,12 +2121,10 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             *(int *)CMSG_DATA(cmsg) = fds[0];
             while (sys_sendmsg(pair[1], &msg, 0) < 0) {
               if (errno != EINTR)
-debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
                 sys__exit(1);
             }
             while (sys_shutdown(pair[1], SHUT_RDWR) < 0) {
               if (errno != EINTR)
-debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
                 sys__exit(1);
             }
           }
@@ -2136,7 +2166,8 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         NO_INTR(sys_close(pair[1]));
 
         /* Get pipe file handle from child                                   */
-        /* scope */ {
+        /* scope */
+        {
           const struct CoredumperCompressor *buffer[1];
           char cmsg_buf[CMSG_SPACE(sizeof(int))];
           struct kernel_iovec  iov;
@@ -2179,8 +2210,9 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
        * So, instead, we run a single thread and make use of callback
        * functions that internally invoke poll() for managing the I/O.
        */
+debug_print("%s:%s:%d: Synchronously write the core to a file\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       int fds[2] = { -1, -1 };
-      int saved_errno, rc;
+      int saved_errno, rc = 0;
       const char *suffix = "";
       struct WriterFds writer_fds;
       ssize_t (*writer)(void *, const void *, size_t);
@@ -2199,10 +2231,12 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
        * necessary, add a compressor to the pipeline.
        */
       if (compressors != NULL && compressors->compressor != NULL) {
+debug_print("%s:%s:%d: CreatePipeline rc = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc);
         if (CreatePipeline(fds, openmax, PATH, &compressors) < 0) {
           goto error;
         }
       }
+debug_print("%s:%s:%d: created pipe[0] read from = %d, pipe[1] write to = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, fds[0], fds[1]);
       if (selected_compressor) {
         *selected_compressor = compressors;
       }
@@ -2223,6 +2257,7 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
           NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
                                                kOpenFlags|O_LARGEFILE,
                                                0600));
+debug_print("%s:%s:%d: open writer_fds.out_fd = %d, filename = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, writer_fds.out_fd, extended_file_name);
           if (writer_fds.out_fd < 0 && EINVAL == errno && O_LARGEFILE) {
             /* This kernel apears not to have large file support.
              * Try again without O_LARGEFILE.
@@ -2230,6 +2265,7 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
                                                  kOpenFlags,
                                                  0600));
+debug_print("%s:%s:%d: open writer_fds.out_fd = %d, filename = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, writer_fds.out_fd, extended_file_name);
           }
           if (writer_fds.out_fd < 0) {
             saved_errno = errno;
@@ -2266,6 +2302,7 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
                            thread_fpregs, hasSSE ? thread_fpxregs : NULL,
                            pagesize, prioritize ? max_length : 0, main_pid,
                            notes, note_count);
+debug_print("%s:%s:%d: rc = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc);
         if (fds[0] >= 0) {
           saved_errno = errno;
           /* Close the input side of the compression pipeline, and flush
@@ -2273,12 +2310,14 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
            */
           if (fds[1] >= 0) { NO_INTR(sys_close(fds[1])); fds[1] = -1; }
           if (FlushPipe(&writer_fds) < 0) {
+// debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
             rc = -1;
           } else {
             errno = saved_errno;
           }
         }
       } else {
+debug_print("%s:%s:%d: set rc = 0\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
         rc = 0;
       }
 
@@ -2289,6 +2328,7 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
       if (fds[1] >= 0)            NO_INTR(sys_close(fds[1]));
       errno = saved_errno;
 
+debug_print("%s:%s:%d rc = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, rc);
       if (rc < 0) {
         goto error;
       }
@@ -2302,7 +2342,7 @@ debug_print("%s:%s:%d: exit 1\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
   }
 
   ResumeAllProcessThreads(threads, pids);
-debug_print("%s:%s:%d fd\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+debug_print("%s:%s:%d fd = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, fd);
   return fd;
 
 error:
