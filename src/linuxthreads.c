@@ -608,9 +608,9 @@ int ListAllProcessThreads(void *parameter,
   if (!dumpable)
     sys_prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
   #else
-  dumpable = sys_prctl(PR_GET_DUMPABLE, 0);
+  dumpable = sys_prctl(PR_GET_DUMPABLE, 0, 0, 0, 0);
   if (!dumpable)
-    sys_prctl(PR_SET_DUMPABLE, 1);
+    sys_prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
   #endif
 
   /* Fill in argument block for dumper thread                                */
@@ -662,7 +662,7 @@ int ListAllProcessThreads(void *parameter,
     #if defined (__aarch64__)
     sys_prctl(PR_SET_PTRACER, clone_pid, 0, 0, 0);
     #else
-    sys_prctl(PR_SET_PTRACER, clone_pid);
+    sys_prctl(PR_SET_PTRACER, clone_pid, 0, 0, 0);
     #endif
 
     sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
@@ -715,7 +715,7 @@ failed:
     sys_prctl(PR_SET_DUMPABLE, dumpable, 0, 0, 0);
   #else
   if (!dumpable)
-    sys_prctl(PR_SET_DUMPABLE, dumpable);
+    sys_prctl(PR_SET_DUMPABLE, dumpable, 0, 0, 0);
   #endif
 
   va_end(args.ap);

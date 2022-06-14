@@ -178,14 +178,15 @@ typedef struct elf_timeval {    /* Time value with microsecond resolution    */
   long tv_usec;                 /* Microseconds                              */
 } elf_timeval;
 
-
-// typedef struct elf_siginfo {    /* Information about signal (unused)         */
-//   int32_t si_signo;             /* Signal number                             */
-//   int32_t si_code;              /* Extra code                                */
-//   int32_t si_errno;             /* Errno                                     */
-// } elf_siginfo;
-
+#if !defined(__aarch64__)
+typedef struct elf_siginfo {    /* Information about signal (unused)         */
+  int32_t si_signo;             /* Signal number                             */
+  int32_t si_code;              /* Extra code                                */
+  int32_t si_errno;             /* Errno                                     */
+} elf_siginfo;
+#else
 typedef struct elf_siginfo elf_siginfo;
+#endif
 
 typedef struct prstatus {       /* Information about thread; includes CPU reg*/
   elf_siginfo    pr_info;       /* Info associated with signal               */
@@ -2021,8 +2022,8 @@ debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
     int openmax  = sysconf(_SC_OPEN_MAX);
     int pagesize = sysconf(_SC_PAGESIZE);
     #else
-    int openmax  = sys_sysconf(_SC_OPEN_MAX);
-    int pagesize = sys_sysconf(_SC_PAGESIZE);
+    int openmax  = sysconf(_SC_OPEN_MAX);
+    int pagesize = sysconf(_SC_PAGESIZE);
     #endif
     struct kernel_sigset_t old_signals, blocked_signals;
 
