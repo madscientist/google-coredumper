@@ -95,6 +95,9 @@ static void debug_print(char *fmt, ...)
 #endif
 }
 
+#define DEBUG_FMT  "%s:%s:%d: "
+#define DEBUG_SRC  __FILE__, __PRETTY_FUNCTION__, __LINE__
+
 /* Wrapper around clone() that runs "fn" on the same stack as the
  * caller! Unlike fork(), the cloned thread shares the same address space.
  * The caller must be careful to use only minimal amounts of stack until
@@ -281,7 +284,7 @@ static void ListerThread(struct ListerParams *args) {
   struct kernel_stat marker_sb, proc_sb;
   stack_t            altstack;
 
-  debug_print("%s:%s:%d, &found_parent = %p\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, &found_parent);
+  debug_print(DEBUG_FMT"&found_parent = %p\n", DEBUG_SRC, &found_parent);
 
   /* Create "marker" that we can use to detect threads sharing the same
    * address space and the same file handles. By setting the FD_CLOEXEC flag
@@ -300,7 +303,7 @@ static void ListerThread(struct ListerParams *args) {
     if (proc >= 0)
       NO_INTR(sys_close(proc));
     sig_proc = proc = -1;
-  debug_print("%s:%s:%d: exit 1, failure\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"exit 1, failure\n", DEBUG_SRC);
     sys__exit(1);
   }
 
@@ -319,7 +322,7 @@ static void ListerThread(struct ListerParams *args) {
     goto failure;
   }
 
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
   /* Catch signals on an alternate pre-allocated stack. This way, we can
    * safely execute the signal handler even if we ran out of memory.
    */
@@ -337,7 +340,7 @@ static void ListerThread(struct ListerParams *args) {
    */
   sig_marker = marker;
   sig_proc   = -1;
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
   for (sig = 0; sig < sizeof(sync_signals)/sizeof(*sync_signals); sig++) {
     struct kernel_sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -359,15 +362,15 @@ static void ListerThread(struct ListerParams *args) {
      * check there first, and then fall back on the older naming
      * convention if necessary.
      */
-  debug_print("%s:%s:%d: proc_path = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, *proc_path);
+  debug_print(DEBUG_FMT"proc_path = %s\n", DEBUG_SRC, *proc_path);
     if ((sig_proc = proc = c_open(*proc_path, O_RDONLY|O_DIRECTORY, 0)) < 0) {
       if (*++proc_path != NULL) {
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
         continue;
       }
       goto failure;
     }
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
     if (sys_fstat(proc, &proc_sb) < 0)
       goto failure;
 
@@ -385,7 +388,7 @@ static void ListerThread(struct ListerParams *args) {
     if (max_threads < proc_sb.st_nlink + 100)
       max_threads = proc_sb.st_nlink + 100;
 
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
     /* scope */ {
       pid_t pids[max_threads];
       int   added_entries = 0;
@@ -396,7 +399,7 @@ static void ListerThread(struct ListerParams *args) {
         char buf[4096];
         ssize_t nbytes = sys_getdents(proc, (struct kernel_dirent *)buf,
                                       sizeof(buf));
-  debug_print("%s:%s:%d: nbytes = %ld, proc = %d, proc_path = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, nbytes, proc, *proc_path);
+  debug_print(DEBUG_FMT"nbytes = %ld, proc = %d, proc_path = %s\n", DEBUG_SRC, nbytes, proc, *proc_path);
         if (nbytes < 0)
           goto failure;
         else if (nbytes == 0) {
@@ -410,7 +413,7 @@ static void ListerThread(struct ListerParams *args) {
             sys_lseek(proc, 0, SEEK_SET);
             continue;
           }
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
           break;
         }
         for (entry = (struct kernel_dirent *)buf;
@@ -420,7 +423,7 @@ static void ListerThread(struct ListerParams *args) {
             const char *ptr = entry->d_name;
             pid_t pid;
 
-  debug_print("%s:%s:%d: ptr = %s\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, ptr);
+  debug_print(DEBUG_FMT"ptr = %s\n", DEBUG_SRC, ptr);
             /* Some kernels hide threads by preceding the pid with a '.'     */
             if (*ptr == '.')
               ptr++;
@@ -506,7 +509,7 @@ static void ListerThread(struct ListerParams *args) {
         next_entry:;
         }
       }
-  debug_print("%s:%s:%d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"\n", DEBUG_SRC);
       NO_INTR(sys_close(proc));
       sig_proc = proc = -1;
 
@@ -524,7 +527,7 @@ static void ListerThread(struct ListerParams *args) {
          */
         if (!found_parent) {
           ResumeAllProcessThreads(num_threads, pids);
-  debug_print("%s:%s:%d: exit 3\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"exit 3\n", DEBUG_SRC);
           sys__exit(3);
         }
 
@@ -534,7 +537,7 @@ static void ListerThread(struct ListerParams *args) {
         args->result = args->callback(args->parameter, num_threads,
                                       pids, args->ap);
         args->err = errno;
-  debug_print("%s:%s:%d: callback err = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"callback err = %d\n", DEBUG_SRC);
 
         /* Callback should have resumed threads, but better safe than sorry  */
         if (ResumeAllProcessThreads(num_threads, pids)) {
@@ -543,7 +546,7 @@ static void ListerThread(struct ListerParams *args) {
           args->result = -1;
         }
 
-  debug_print("%s:%s:%d: exit 0\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+  debug_print(DEBUG_FMT"exit 0\n", DEBUG_SRC);
         sys__exit(0);
       }
     detach_threads:
@@ -584,7 +587,7 @@ int ListAllProcessThreads(void *parameter,
   int                    dumpable = 1, sig;
   struct kernel_sigset_t sig_blocked, sig_old;
 
-  debug_print("%s: &arg = %p, altstack = %p\n", __PRETTY_FUNCTION__, &args, &(altstack_mem[MINSIGSTKSZ]));
+  debug_print(DEBUG_FMT"&arg = %p, altstack = %p\n", DEBUG_SRC, &args, &(altstack_mem[MINSIGSTKSZ]));
   va_start(args.ap, callback);
 
   /* If we are short on virtual memory, initializing the alternate stack
@@ -668,7 +671,7 @@ int ListAllProcessThreads(void *parameter,
     sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
 
     if (clone_pid >= 0) {
- debug_print("%s:%s:%d: parent\n", __FILE__, __PRETTY_FUNCTION__, __LINE__);
+ debug_print(DEBUG_FMT"parent\n", DEBUG_SRC);
 
       int status, rc;
       #if defined (__aarch64__)
@@ -707,7 +710,7 @@ int ListAllProcessThreads(void *parameter,
     }
   }
 
- debug_print("%s:%s:%d result = %d, err = %d\n", __FILE__, __PRETTY_FUNCTION__, __LINE__, args.result, args.err);
+ debug_print(DEBUG_FMT"esult = %d, err = %d\n", DEBUG_SRC, args.result, args.err);
   /* Restore the "dumpable" state of the process                             */
 failed:
   #if defined (__aarch64__)
