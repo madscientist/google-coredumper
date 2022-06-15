@@ -463,7 +463,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
   const unsigned char *buf = (const unsigned char *)void_buf;
   struct WriterFds *fds    = (struct WriterFds *)f;
   size_t len               = bytes;
-DEBUG_PRINT("ENTER: fds->max_length = %ld, bytes = %ld\n", fds->max_length, bytes);
+DEBUG_PRINT("ENTER: fds->max_length = %ld, bytes = %ld, buf = %p\n", fds->max_length, bytes, void_buf);
   while (fds->max_length > 0 && len > 0) {
 DEBUG_PRINT("bytes = %ld, len = %ld\n", bytes, len);
     ssize_t rc;
@@ -524,9 +524,8 @@ DEBUG_PRINT("%lu\n", fds->max_length);
       /* The compressor has consumed all previous data and is ready to
        * receive more.
        */
-DEBUG_PRINT("%s.\n", "Write to compressor");
       NO_INTR(rc = sys_write(fds->write_fd, buf, len));
-DEBUG_PRINT("rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", rc, fds->write_fd, len, errno, buf);
+DEBUG_PRINT("Write to compressor: rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", rc, fds->write_fd, len, errno, buf);
       if (rc < 0 && errno != EAGAIN) {
         return -1;
       }
@@ -797,6 +796,23 @@ static Ehdr *SanitizeVDSO(Ehdr *ehdr, size_t start, size_t end) {
   return ehdr;
 }
 
+void dump(const char* file)
+{
+  int dump_fd;
+  NO_INTR(dump_fd = sys_open(file, O_RDONLY, 0));
+  if (dump_fd >= 0) {
+    char buf[4096] = "";
+    int dump_errno;
+    ssize_t n = c_read(dump_fd, buf, sizeof(buf), &dump_errno);
+DEBUG_PRINT("read %s = %d, n = %ld, errno = %d\n", file, dump_fd, n, dump_errno);
+    if (n > 0) {
+      buf[n] = '\0';
+DEBUG_PRINT("start dump %s\n%s\nend dump %s\n", file, buf, file);
+    }
+    NO_INTR(sys_close(dump_fd));
+  }
+}
+
 /* This function is invoked from a separate process. It has access to a
  * copy-on-write copy of the parents address space, and all crucial
  * information about the parent has been computed by the caller.
@@ -822,6 +838,8 @@ static int CreateElfCore(void *handle,
   if (sys_pipe(loopback) < 0)
     goto done;
 
+  dump("/proc/self/maps");
+
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
 DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
@@ -846,7 +864,9 @@ DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
         int   flags;
       } mappings[num_mappings];
       io.data = io.end = 0;
+  dump("/proc/self/smaps");
       NO_INTR(io.fd = sys_open("/proc/self/smaps", O_RDONLY, 0));
+DEBUG_PRINT("open /proc/self/smaps = %d\n", io.fd);
       if (io.fd >= 0) {
         size_t note_align;
         size_t num_extra_phdrs = 0;
@@ -1063,7 +1083,6 @@ DEBUG_PRINT("vdso.address = %p\n", vdso.address);
           }
         }
 
-DEBUG_PRINT("%s\n", "Write out the ELF header");
         /* Write out the ELF header                                          */
         /* scope */ {
           Ehdr ehdr;
@@ -1098,13 +1117,12 @@ DEBUG_PRINT("%s\n", "Write out the ELF header");
           ehdr.e_phnum    = num_mappings + num_extra_phdrs + 1;
           ehdr.e_shentsize= sizeof(Shdr);
           ssize_t written = writer(handle, &ehdr, sizeof(Ehdr));
-DEBUG_PRINT("written = %ld sizeof(Ehdr) = %ld\n", written, sizeof(Ehdr));
+DEBUG_PRINT("Write out the ELF header: written = %ld sizeof(Ehdr) = %ld\n", written, sizeof(Ehdr));
           if (written != sizeof(Ehdr)) {
             goto done;
           }
         }
 
-DEBUG_PRINT("%s\n", "Write program headers");
         /* Write program headers, starting with the PT_NOTE entry            */
         /* scope */ {
           Phdr   phdr;
@@ -1144,7 +1162,9 @@ DEBUG_PRINT("%s\n", "Write program headers");
           phdr.p_type     = PT_NOTE;
           phdr.p_offset   = offset;
           phdr.p_filesz   = filesz;
-          if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
+          ssize_t written = writer(handle, &phdr, sizeof(Phdr));
+DEBUG_PRINT("Write program headers: written = %ld, sizeof(Phdr) = %lu\n", written, sizeof(Phdr));
+          if (written != sizeof(Phdr)) {
             goto done;
           }
 
@@ -1227,7 +1247,9 @@ DEBUG_PRINT("num_mappings = %d\n", num_mappings);
             filesz        = mappings[i].write_size;
             phdr.p_filesz = filesz;
             phdr.p_flags  = mappings[i].flags & PF_MASK;
-            if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
+            ssize_t written = writer(handle, &phdr, sizeof(Phdr));
+DEBUG_PRINT("Write mapping headers: written = %ld, sizeof(Phdr) = %lu\n", written, sizeof(Phdr));
+            if (written != sizeof(Phdr)) {
               goto done;
             }
           }
@@ -1241,7 +1263,9 @@ DEBUG_PRINT("vdso.ehdr = %p\n", vdso.ehdr);
                 filesz        = phdr.p_filesz;
                 phdr.p_offset = offset;
                 phdr.p_paddr  = 0; /* match other core phdrs                 */
-                if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
+                ssize_t written = writer(handle, &phdr, sizeof(Phdr));
+DEBUG_PRINT("Write vdso.ehdr headers: written = %ld, sizeof(Phdr) = %lu\n", written, sizeof(Phdr));
+                if (written != sizeof(Phdr)) {
                   goto done;
                 }
               }
@@ -1316,8 +1340,10 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
            */
           for (i = num_threads; i-- > 0; ) {
             if (pids[i] == main_pid) {
-              if (WriteThreadRegs(handle, writer, prstatus, pids[i],
-                                  regs+i, fpregs+i, fpxregs+i)) {
+              int rc_wtr = WriteThreadRegs(handle, writer, prstatus, pids[i],
+                                  regs+i, fpregs+i, fpxregs+i);
+DEBUG_PRINT("WriteThreadRegs: pids[%d](%d) == main_pid(%d) rc = %d\n", i, pids[i], main_pid, rc_wtr);
+              if (rc_wtr) {
                 goto done;
               }
               break;
@@ -1325,14 +1351,17 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
           }
           for (i = num_threads; i-- > 0; ) {
             if (pids[i] != main_pid) {
-              if (WriteThreadRegs(handle, writer, prstatus, pids[i],
-                                  regs+i, fpregs+i, fpxregs+i)) {
+              int rc_wtr = WriteThreadRegs(handle, writer, prstatus, pids[i],
+                                  regs+i, fpregs+i, fpxregs+i);
+DEBUG_PRINT("WriteThreadRegs: pids[%d](%d) != main_pid(%d) rc = %d\n", i, pids[i], main_pid, rc_wtr);
+              if (rc_wtr) {
                 goto done;
               }
             }
           }
 
           /* Write user provided notes                                       */
+DEBUG_PRINT("%s\n", "Write user provided notes");
           for (i = 0; i < extra_notes_count; i++) {
             size_t name_align = 0, description_align = 0;
             const char scratch[3] = {0,0,0};
@@ -1347,10 +1376,12 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
               description_align = 4 - nhdr.n_descsz % 4;
             }
             /* Write the note header                                         */
+DEBUG_PRINT("%s\n", "Write the note header");
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr)) {
               goto done;
             }
             /* Write the note name and padding                               */
+DEBUG_PRINT("%s\n", "Write the note name and padding");
             if (writer(handle, extra_notes[i].name, nhdr.n_namesz)
                   != nhdr.n_namesz) {
               goto done;
@@ -1359,6 +1390,7 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
               goto done;
             }
             /* Write the note description and padding                        */
+DEBUG_PRINT("%s\n", "Write the note description and padding");
             if (writer(handle, extra_notes[i].description, nhdr.n_descsz)
                   != nhdr.n_descsz) {
               goto done;
@@ -1372,6 +1404,7 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
 
         /* Align all following segments to multiples of page size            */
         if (note_align) {
+DEBUG_PRINT("%s\n", "Align all following segments to multiples of page size");
           char scratch[note_align];
           memset(scratch, 0, note_align*sizeof(char));
           if (writer(handle, scratch, note_align*sizeof(char)) != note_align*sizeof(char)) {
@@ -1380,15 +1413,20 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
         }
 
         /* Write all memory segments                                         */
+DEBUG_PRINT("%s\n", "Write all memory segments");
         for (i = 0; i < num_mappings; i++) {
-          if (mappings[i].write_size > 0 &&
-              writer(handle, (void *)mappings[i].start_address,
-                     mappings[i].write_size) != mappings[i].write_size) {
-            goto done;
+          if (mappings[i].write_size > 0) {
+            ssize_t written = writer(handle, (void *)mappings[i].start_address,
+                     mappings[i].write_size);
+DEBUG_PRINT("segment = %d write_size = %lu, start_address = %p, written = %ld\n", i, mappings[i].write_size, (void *)mappings[i].start_address, written);
+            if (written != mappings[i].write_size) {
+              goto done;
+            }
           }
         }
         if (vdso.address) {
           /* Finally write the contents of Phdrs that "belong" to vdso.      */
+DEBUG_PRINT("%s\n", "Finally write the contents of Phdrs that \"belong\" to vdso");
           Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
           for (i = 0; i < vdso.ehdr->e_phnum; i++) {
             Phdr *p = vdso_phdr+i;
