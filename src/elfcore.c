@@ -1418,10 +1418,12 @@ DEBUG_PRINT("%s\n", "Write all memory segments");
           if (mappings[i].write_size > 0) {
             ssize_t written = writer(handle, (void *)mappings[i].start_address,
                      mappings[i].write_size);
-DEBUG_PRINT("segment = %d write_size = %lu, start_address = %p, written = %ld\n", i, mappings[i].write_size, (void *)mappings[i].start_address, written);
+DEBUG_PRINT("segment = %d write_size = %lu, start_address = %p, end_address = %p, flags = 0x%x written = %ld\n", i, mappings[i].write_size, (void *)mappings[i].start_address, (void *)mappings[i].end_address, mappings[i].flags, written);
             if (written != mappings[i].write_size) {
               goto done;
             }
+          } else {
+DEBUG_PRINT("segment = %d write_size = %lu, start_address = %p, end_address = %p, flags = 0x%x\n", i, mappings[i].write_size, (void *)mappings[i].start_address, (void *)mappings[i].end_address, mappings[i].flags);
           }
         }
         if (vdso.address) {
