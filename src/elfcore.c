@@ -314,19 +314,8 @@ namespace {
 #define ERRNO my_errno
 #endif
 
-static void debug_print(char *fmt, ...)
-{
-#if 1
-   va_list arg_ptr;
-   va_start(arg_ptr, fmt);
-   vprintf(fmt, arg_ptr);
-   va_end(arg_ptr);
-#endif
-}
-
-#define DEBUG_FMT  "%s:%s:%d: "
-#define DEBUG_SRC  __FILE__, __PRETTY_FUNCTION__, __LINE__
-#define DEBUG_PRINT(fmt, ...)  debug_print(DEBUG_FMT fmt, DEBUG_SRC, __VA_ARGS__)
+#define ENABLE_DEBUG_PRINT 1
+#include "debug_print.h"
 
 /* Re-runs fn until it doesn't cause EINTR
  */

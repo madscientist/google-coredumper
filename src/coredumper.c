@@ -117,18 +117,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
 }
 #endif
 
-static void debug_print(char *fmt, ...)
-{
-#if 1
-   va_list arg_ptr;
-   va_start(arg_ptr, fmt);
-   vprintf(fmt, arg_ptr);
-   va_end(arg_ptr);
-#endif
-}
-
-#define DEBUG_FMT  "%s:%s:%d: "
-#define DEBUG_SRC  __FILE__, __PRETTY_FUNCTION__, __LINE__
+#define ENABLE_DEBUG_PRINT 1
+#include "debug_print.h"
 
 /* Internal helper method used by GetCoreDump().
  */
@@ -202,7 +192,7 @@ static int WriteCoreDumpFunction(void *frame,
  */
 int WriteCoreDump(const char *file_name) {
   FRAME(frame);
-  debug_print(DEBUG_FMT"tid = %d\n", DEBUG_SRC, frame.tid);
+  DEBUG_PRINT("tid = %d\n", frame.tid);
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);
   return WriteCoreDumpFunction(&frame, &params, file_name);
@@ -211,7 +201,7 @@ int WriteCoreDump(const char *file_name) {
 int WriteCoreDumpWith(const struct CoreDumpParameters *params,
                       const char *file_name) {
   FRAME(frame);
-  debug_print(DEBUG_FMT"tid = %d\n", DEBUG_SRC, frame.tid);
+  DEBUG_PRINT("tid = %d\n", frame.tid);
   return WriteCoreDumpFunction(&frame, params, file_name);
 }
 
@@ -220,7 +210,7 @@ int WriteCoreDumpWith(const struct CoreDumpParameters *params,
  */
 int WriteCoreDumpLimited(const char *file_name, size_t max_length) {
   FRAME(frame);
-  debug_print(DEBUG_FMT"tid = %d\n", DEBUG_SRC, frame.tid);
+  DEBUG_PRINT("tid = %d\n", frame.tid);
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);
   SetCoreDumpLimited(&params, max_length);
@@ -234,7 +224,7 @@ int WriteCoreDumpLimited(const char *file_name, size_t max_length) {
  */
 int WriteCoreDumpLimitedByPriority(const char *file_name, size_t max_length) {
   FRAME(frame);
-  debug_print(DEBUG_FMT"tid = %d\n", DEBUG_SRC, frame.tid);
+  DEBUG_PRINT("tid = %d\n", frame.tid);
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);
   SetCoreDumpLimitedByPriority(&params, max_length);
@@ -252,7 +242,7 @@ int WriteCompressedCoreDump(const char *file_name, size_t max_length,
                             const struct CoredumperCompressor compressors[],
                             struct CoredumperCompressor **selected_compressor){
   FRAME(frame);
-  debug_print(DEBUG_FMT"tid = %d\n", DEBUG_SRC, frame.tid);
+  DEBUG_PRINT("tid = %d\n", frame.tid);
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);
   SetCoreDumpCompressed(&params, compressors, selected_compressor);
