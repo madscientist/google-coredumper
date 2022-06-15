@@ -326,6 +326,7 @@ static void debug_print(char *fmt, ...)
 
 #define DEBUG_FMT  "%s:%s:%d: "
 #define DEBUG_SRC  __FILE__, __PRETTY_FUNCTION__, __LINE__
+#define DEBUG_PRINT(fmt, ...)  debug_print(DEBUG_FMT fmt, DEBUG_SRC, __VA_ARGS__)
 
 /* Re-runs fn until it doesn't cause EINTR
  */
@@ -433,7 +434,7 @@ struct WriterFds {
  */
 static int PipeDone(void *f) {
   struct WriterFds *fds = (struct WriterFds *)f;
-debug_print(DEBUG_FMT"fds->max_length = %ld\n", DEBUG_SRC, fds->max_length);
+DEBUG_PRINT("fds->max_length = %ld\n", fds->max_length);
   return fds->max_length == 0;
 }
 
@@ -462,23 +463,23 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
   const unsigned char *buf = (const unsigned char *)void_buf;
   struct WriterFds *fds    = (struct WriterFds *)f;
   size_t len               = bytes;
-debug_print(DEBUG_FMT"ENTER: fds->max_length = %ld, bytes = %ld\n", DEBUG_SRC, fds->max_length, bytes);
+DEBUG_PRINT("ENTER: fds->max_length = %ld, bytes = %ld\n", fds->max_length, bytes);
   while (fds->max_length > 0 && len > 0) {
-debug_print(DEBUG_FMT"bytes = %ld, len = %ld\n", DEBUG_SRC, bytes, len);
+DEBUG_PRINT("bytes = %ld, len = %ld\n", bytes, len);
     ssize_t rc;
     struct kernel_pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
                                       { fds->write_fd, POLLOUT, 0 } };
     int nfds = sys_poll(pfd, 2, -1);
 
-// debug_print(DEBUG_FMT"compressed_fd = %d, write_fd = %d, errno = %d\n", DEBUG_SRC, fds->compressed_fd, fds->write_fd, errno);
-// debug_print(DEBUG_FMT"nfds = %d\n", DEBUG_SRC, nfds);
+// DEBUG_PRINT("compressed_fd = %d, write_fd = %d, errno = %d\n", fds->compressed_fd, fds->write_fd, errno);
+// DEBUG_PRINT("nfds = %d\n", nfds);
     if (nfds < 0) {
       /* Abort on fatal unexpected I/O errors.                               */
       break;
     }
 
     if (nfds > 0 && (pfd[0].revents & POLLIN)) {
-debug_print(DEBUG_FMT"Read from compressor data. Copy to output file\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "Read from compressor data. Copy to output file");
       /* Some compressed data has become available. Copy to output file.     */
       char scratch[4096];
       for (;;) {
@@ -491,7 +492,7 @@ debug_print(DEBUG_FMT"Read from compressor data. Copy to output file\n", DEBUG_S
         errno = -1;
 
         NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
-debug_print(DEBUG_FMT"sys_read = %d, compressed_fd = %d, l = %ld\n", DEBUG_SRC, rc, fds->compressed_fd, l);
+DEBUG_PRINT("sys_read = %d, compressed_fd = %d, l = %ld\n", rc, fds->compressed_fd, l);
         if (rc < 0) {
           /* The file handle is set to be non-blocking, so we loop until
            * read() returns -1.
@@ -499,23 +500,23 @@ debug_print(DEBUG_FMT"sys_read = %d, compressed_fd = %d, l = %ld\n", DEBUG_SRC, 
           if (errno == EAGAIN) {
             break;
           }
-debug_print(DEBUG_FMT"return rc = -1\n", DEBUG_SRC);
+DEBUG_PRINT("return rc = %d\n", -1);
           return -1;
         } else if (rc == 0) {
           fds->max_length = 0;
-debug_print(DEBUG_FMT"set max_length %lu\n", fds->max_length);
+DEBUG_PRINT("set max_length %lu\n", fds->max_length);
           break;
         }
         ssize_t read_rc = rc;
         rc = c_write(fds->out_fd, scratch, rc, &errno);
-debug_print(DEBUG_FMT"c_write = %d, out_fd = %d, length(rc) = %ld\n", DEBUG_SRC, rc, fds->out_fd, read_rc);
+DEBUG_PRINT("c_write = %d, out_fd = %d, length(rc) = %ld\n", rc, fds->out_fd, read_rc);
         if (rc <= 0) {
-debug_print(DEBUG_FMT"return rc = -1\n", DEBUG_SRC);
+DEBUG_PRINT("return rc = %d\n", -1);
           return -1;
         }
-debug_print(DEBUG_FMT"fds->max_length(%lu) - rc(%ld) = ", DEBUG_SRC, fds->max_length, rc);
+DEBUG_PRINT("fds->max_length(%lu) - rc(%ld) = ", fds->max_length, rc);
         fds->max_length -= rc;
-debug_print(DEBUG_FMT"%lu\n", DEBUG_SRC, fds->max_length);
+DEBUG_PRINT("%lu\n", fds->max_length);
       }
       nfds--;
     }
@@ -523,9 +524,9 @@ debug_print(DEBUG_FMT"%lu\n", DEBUG_SRC, fds->max_length);
       /* The compressor has consumed all previous data and is ready to
        * receive more.
        */
-debug_print(DEBUG_FMT"Write to compressor.\n", DEBUG_SRC);
+DEBUG_PRINT("%s.\n", "Write to compressor");
       NO_INTR(rc = sys_write(fds->write_fd, buf, len));
-debug_print(DEBUG_FMT"rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", DEBUG_SRC, rc, fds->write_fd, len, errno, buf);
+DEBUG_PRINT("rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", rc, fds->write_fd, len, errno, buf);
       if (rc < 0 && errno != EAGAIN) {
         return -1;
       }
@@ -533,7 +534,7 @@ debug_print(DEBUG_FMT"rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n",
       len -= rc;
     }
   }
-debug_print(DEBUG_FMT"bytes - len = %ld\n", DEBUG_SRC, bytes - len);
+DEBUG_PRINT("bytes - len = %ld\n", bytes - len);
   return bytes - len;
 }
 
@@ -553,7 +554,7 @@ static int FlushPipe(struct WriterFds *fds) {
     }
     if (l > 0) {
       NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
-debug_print(DEBUG_FMT"sys_read = %d, compressed_fd= %d, l = %ld\n", DEBUG_SRC, rc, fds->compressed_fd, l);
+DEBUG_PRINT("sys_read = %d, compressed_fd= %d, l = %ld\n", rc, fds->compressed_fd, l);
       if (rc < 0) {
         return -1;
       } else if (rc == 0) {
@@ -733,7 +734,6 @@ static void CountAUXV(size_t *pnum_auxv, size_t *pvdso_ehdr) {
     ssize_t nread;
     do {
       NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
-debug_print(DEBUG_FMT"sys_read = %d, fd = %d, sizeof(auxv_t) = %ld\n", DEBUG_SRC, nread, fd, sizeof(auxv_t));
       if (sizeof(auxv_t) != nread)
         break;
       num_auxv++;
@@ -824,7 +824,7 @@ static int CreateElfCore(void *handle,
 
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
-debug_print(DEBUG_FMT"open /proc/self/maps = %d\n", DEBUG_SRC, io.fd);
+DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
   if (io.fd >= 0) {
     int i, ch;
     while ((ch = GetChar(&io)) >= 0) {
@@ -859,7 +859,7 @@ debug_print(DEBUG_FMT"open /proc/self/maps = %d\n", DEBUG_SRC, io.fd);
          * "^[0-9A-F]*-[0-9A-F]* [r-][w-][x-][p-] [0-9A-F]*.*$"
          * At the start of each iteration, ch contains the first character.
          */
-debug_print(DEBUG_FMT"num_mappings = %d\n", DEBUG_SRC, num_mappings);
+DEBUG_PRINT("num_mappings = %d\n", num_mappings);
         for (i = 0; i < num_mappings;) {
           static const char * const dev_zero = "/dev/zero";
           const char *dev = dev_zero;
@@ -1043,7 +1043,7 @@ debug_print(DEBUG_FMT"num_mappings = %d\n", DEBUG_SRC, num_mappings);
         }
         NO_INTR(sys_close(io.fd));
 
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("vdso.address = %p\n", vdso.address);
         if (vdso.address) {
           /* Sanity checks.                                                  */
           for (i = 0; i < num_mappings; i++) {
@@ -1063,7 +1063,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
           }
         }
 
-debug_print(DEBUG_FMT"Write out the ELF header\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "Write out the ELF header");
         /* Write out the ELF header                                          */
         /* scope */ {
           Ehdr ehdr;
@@ -1098,13 +1098,13 @@ debug_print(DEBUG_FMT"Write out the ELF header\n", DEBUG_SRC);
           ehdr.e_phnum    = num_mappings + num_extra_phdrs + 1;
           ehdr.e_shentsize= sizeof(Shdr);
           ssize_t written = writer(handle, &ehdr, sizeof(Ehdr));
-debug_print(DEBUG_FMT"written = %ld sizeof(Ehdr) = %ld\n", DEBUG_SRC, written, sizeof(Ehdr));
+DEBUG_PRINT("written = %ld sizeof(Ehdr) = %ld\n", written, sizeof(Ehdr));
           if (written != sizeof(Ehdr)) {
             goto done;
           }
         }
 
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "Write program headers");
         /* Write program headers, starting with the PT_NOTE entry            */
         /* scope */ {
           Phdr   phdr;
@@ -1157,7 +1157,6 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
             note_align    = 0;
           offset         += note_align;
 
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
           /* If the option is set, remove the largest memory sections first
            * when limiting the size of the core dump.
            * If prioritize_max_length is zero, the prioritization option wasn't
@@ -1217,7 +1216,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
             }
           }
 
-debug_print(DEBUG_FMT"num_mappings = %d\n", DEBUG_SRC, num_mappings);
+DEBUG_PRINT("num_mappings = %d\n", num_mappings);
           for (i = 0; i < num_mappings; i++) {
             offset       += filesz;
             filesz        = mappings[i].end_address -mappings[i].start_address;
@@ -1232,7 +1231,7 @@ debug_print(DEBUG_FMT"num_mappings = %d\n", DEBUG_SRC, num_mappings);
               goto done;
             }
           }
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("vdso.ehdr = %p\n", vdso.ehdr);
           if (vdso.ehdr) {
             Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
             for (i = 0; i < vdso.ehdr->e_phnum; i++) {
@@ -1250,7 +1249,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
           }
         }
         /* Write note section                                                */
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "Write note section");
         /* scope */ {
           Nhdr nhdr;
           memset(&nhdr, 0, sizeof(Nhdr));
@@ -1264,7 +1263,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
             goto done;
           }
           if (user) {
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("user = %p\n", user);
             nhdr.n_descsz   = sizeof(struct core_user);
             nhdr.n_type     = NT_PRXREG;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
@@ -1275,7 +1274,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
             }
           }
           if (num_auxv) {
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("num_auxv = %lu\n", num_auxv);
             /* Dump entire auxv[] array as NT_AUXV note, to match what
              * kernel code in fs/binfmt_elf.c does.
              * Without this, gdb can't unwind through vdso on i686.
@@ -1296,20 +1295,20 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
               ssize_t nread;
               auxv_t auxv;
               NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
-debug_print(DEBUG_FMT"sys_read = %d, fd= %d, sizeof(auxv_t) = %ld\n", DEBUG_SRC, nread, fd, sizeof(auxv_t));
+DEBUG_PRINT("sys_read = %d, fd= %d, sizeof(auxv_t) = %ld\n", nread, fd, sizeof(auxv_t));
               if (nread != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
               }
               int rc1 = writer(handle, &auxv, sizeof(auxv_t));
-debug_print(DEBUG_FMT"writer = %d, handle = %p, sizeof(auxv_t) = %ld\n", DEBUG_SRC, rc1, handle, sizeof(auxv_t));
+DEBUG_PRINT("writer = %d, handle = %p, sizeof(auxv_t) = %ld\n", rc1, handle, sizeof(auxv_t));
               if (rc1 != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
               }
             }
           }
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("num_threads = %d\n", num_threads);
           /* The order of threads in the output matters to gdb:
            * it assumes that the first one is the one that crashed.
            * Make it easier for the end-user to find crashing thread
@@ -1409,7 +1408,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
   }
 
 done:
-debug_print(DEBUG_FMT"done: rc = %d\n", DEBUG_SRC, rc);
+DEBUG_PRINT("done: rc = %d\n", rc);
   if (is_done(handle)) {
     rc = 0;
   }
@@ -1418,7 +1417,7 @@ debug_print(DEBUG_FMT"done: rc = %d\n", DEBUG_SRC, rc);
     NO_INTR(sys_close(loopback[0]));
   if (loopback[1] >= 0)
     NO_INTR(sys_close(loopback[1]));
-debug_print(DEBUG_FMT"return: rc = %d\n", DEBUG_SRC, rc);
+DEBUG_PRINT("return: rc = %d\n", rc);
   return rc;
 }
 
@@ -1558,18 +1557,18 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
                           const struct CoredumperCompressor** compressors) {
   int saved_errno1 = 0;
 
-debug_print(DEBUG_FMT"PATH = %s\n", DEBUG_SRC, PATH);
+DEBUG_PRINT("PATH = %s\n", PATH);
   /* Create a pipe for communicating between processes                       */
   if (sys_pipe(fds) < 0)
     return -1;
 
-debug_print(DEBUG_FMT"pipe[0] read from = %d, pipe[1] write to = %d\n", DEBUG_SRC, fds[0], fds[1]);
+DEBUG_PRINT("pipe[0] read from = %d, pipe[1] write to = %d\n", fds[0], fds[1]);
   /* Find a suitable compressor program, if necessary                        */
   if (*compressors != NULL && (*compressors)->compressor != NULL) {
-debug_print(DEBUG_FMT"compressor = %s\n", DEBUG_SRC, (*compressors)->compressor);
-    char stack[4096];
+    char stack[4096] __attribute__((aligned (16)));
     struct CreateArgs args;
     pid_t comp_pid;
+DEBUG_PRINT("compressor = %s, stack = %p, aligned = %p\n", (*compressors)->compressor, stack, stack + sizeof(stack) - 16);
 
     args.fds         = fds;
     args.openmax     = openmax;
@@ -1582,7 +1581,7 @@ debug_print(DEBUG_FMT"compressor = %s\n", DEBUG_SRC, (*compressors)->compressor)
         NO_INTR(sys_close(fds[0]));
         NO_INTR(sys_close(fds[1]));
         errno = saved_errno;
-debug_print(DEBUG_FMT"close pipe return -1\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "close pipe return -1");
         return -1;
       }
     } else if (sys_pipe(args.zip_out) < 0) {
@@ -1595,9 +1594,8 @@ debug_print(DEBUG_FMT"close pipe return -1\n", DEBUG_SRC);
       }
     }
 
-debug_print(DEBUG_FMT"zip_in[0] read from = %d, zip_in[1] write to = %d\n", DEBUG_SRC, args.zip_in[0], args.zip_in[1]);
-
-debug_print(DEBUG_FMT"zip_out[0] read from = %d, zip_out[1] write to = %d\n", DEBUG_SRC, args.zip_out[0], args.zip_out[1]);
+DEBUG_PRINT("zip_in[0] read from = %d, zip_in[1] write to = %d\n", args.zip_in[0], args.zip_in[1]);
+DEBUG_PRINT("zip_out[0] read from = %d, zip_out[1] write to = %d\n", args.zip_out[0], args.zip_out[1]);
 
     /* We use clone() here, instead of the more common fork(). This ensures
      * that the WriteCoreDump() code path never results in making a COW
@@ -1641,7 +1639,7 @@ debug_print(DEBUG_FMT"zip_out[0] read from = %d, zip_out[1] write to = %d\n", DE
         NO_INTR(sys_close(args.zip_in[0]));
         NO_INTR(sys_close(args.zip_in[1]));
         errno = saved_errno2;
-debug_print(DEBUG_FMT"return -1\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "return -1");
         return -1;
       }
     }
@@ -1671,7 +1669,7 @@ debug_print(DEBUG_FMT"return -1\n", DEBUG_SRC);
       }
     }
   }
-debug_print(DEBUG_FMT"return 0\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "return 0");
   return 0;
 }
 
@@ -1689,7 +1687,7 @@ debug_print(DEBUG_FMT"return 0\n", DEBUG_SRC);
 static inline int GetParentRegs(void *frame, regs *cpu, fpregs *fp,
                                 fpxregs *fpx, int *hasSSE) {
 #ifdef THREADS
-debug_print(DEBUG_FMT"THREADS return 1\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "THREADS return 1");
   return 1;
 #else
   int rc = 0;
@@ -1848,9 +1846,9 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 #if 0
       memset(scratch, 0xFF, sizeof(scratch));
       ptrace_rc = sys_ptrace(PTRACE_GETFPXREGS, pids[i], NT_PRXFPREG, &scratch_iovec);
-debug_print(DEBUG_FMT"rc = %d errno = %d\n", DEBUG_SRC, ptrace_rc, errno);
+DEBUG_PRINT("rc = %d errno = %d\n", ptrace_rc, errno);
       if (ptrace_rc == 0) {
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "");
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
         #if defined(__i386__) && !defined( __x86_64__)
@@ -1864,7 +1862,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
         hasSSE = 0;
         #endif
       } else {
-debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "");
         goto ptrace;
       }
 #endif
@@ -2061,7 +2059,7 @@ debug_print(DEBUG_FMT"\n", DEBUG_SRC);
       }
     }
 
-debug_print(DEBUG_FMT"file_name = %p\n", DEBUG_SRC, file_name);
+DEBUG_PRINT("file_name = %p\n", file_name);
     if (file_name == NULL) {
       /* Create a file descriptor that can be used for reading data from
        * our child process. This is a little complicated because we need
@@ -2215,13 +2213,13 @@ debug_print(DEBUG_FMT"file_name = %p\n", DEBUG_SRC, file_name);
        * So, instead, we run a single thread and make use of callback
        * functions that internally invoke poll() for managing the I/O.
        */
-debug_print(DEBUG_FMT"Synchronously write the core to a file\n", DEBUG_SRC);
       int fds[2] = { -1, -1 };
       int saved_errno, rc = 0;
       const char *suffix = "";
       struct WriterFds writer_fds;
       ssize_t (*writer)(void *, const void *, size_t);
 
+DEBUG_PRINT("Synchronously write the core to a file = %s\n", file_name);
       /* If compiled without threading support, this is the only
        * place where we can request the parent's CPU
        * registers. This function is a no-op when threading
@@ -2236,12 +2234,12 @@ debug_print(DEBUG_FMT"Synchronously write the core to a file\n", DEBUG_SRC);
        * necessary, add a compressor to the pipeline.
        */
       if (compressors != NULL && compressors->compressor != NULL) {
-debug_print(DEBUG_FMT"CreatePipeline rc = %d\n", DEBUG_SRC, rc);
+DEBUG_PRINT("CreatePipeline rc = %d\n", rc);
         if (CreatePipeline(fds, openmax, PATH, &compressors) < 0) {
           goto error;
         }
       }
-debug_print(DEBUG_FMT"created pipe[0] read from = %d, pipe[1] write to = %d\n", DEBUG_SRC, fds[0], fds[1]);
+DEBUG_PRINT("created rc = %d pipe[0] read from = %d, pipe[1] write to = %d\n", fds[0], fds[1]);
       if (selected_compressor) {
         *selected_compressor = compressors;
       }
@@ -2262,7 +2260,7 @@ debug_print(DEBUG_FMT"created pipe[0] read from = %d, pipe[1] write to = %d\n", 
           NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
                                                kOpenFlags|O_LARGEFILE,
                                                0600));
-debug_print(DEBUG_FMT"open writer_fds.out_fd = %d, filename = %s\n", DEBUG_SRC, writer_fds.out_fd, extended_file_name);
+DEBUG_PRINT("open writer_fds.out_fd = %d, filename = %s\n", writer_fds.out_fd, extended_file_name);
           if (writer_fds.out_fd < 0 && EINVAL == errno && O_LARGEFILE) {
             /* This kernel apears not to have large file support.
              * Try again without O_LARGEFILE.
@@ -2270,7 +2268,7 @@ debug_print(DEBUG_FMT"open writer_fds.out_fd = %d, filename = %s\n", DEBUG_SRC, 
             NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
                                                  kOpenFlags,
                                                  0600));
-debug_print(DEBUG_FMT"open writer_fds.out_fd = %d, filename = %s\n", DEBUG_SRC, writer_fds.out_fd, extended_file_name);
+DEBUG_PRINT("open writer_fds.out_fd = %d, filename = %s\n", writer_fds.out_fd, extended_file_name);
           }
           if (writer_fds.out_fd < 0) {
             saved_errno = errno;
@@ -2307,7 +2305,7 @@ debug_print(DEBUG_FMT"open writer_fds.out_fd = %d, filename = %s\n", DEBUG_SRC, 
                            thread_fpregs, hasSSE ? thread_fpxregs : NULL,
                            pagesize, prioritize ? max_length : 0, main_pid,
                            notes, note_count);
-debug_print(DEBUG_FMT"CreateElfCore rc = %d\n", DEBUG_SRC, rc);
+DEBUG_PRINT("CreateElfCore rc = %d\n", rc);
         if (fds[0] >= 0) {
           saved_errno = errno;
           /* Close the input side of the compression pipeline, and flush
@@ -2315,14 +2313,14 @@ debug_print(DEBUG_FMT"CreateElfCore rc = %d\n", DEBUG_SRC, rc);
            */
           if (fds[1] >= 0) { NO_INTR(sys_close(fds[1])); fds[1] = -1; }
           if (FlushPipe(&writer_fds) < 0) {
-// debug_print(DEBUG_FMT"\n", DEBUG_SRC);
+// DEBUG_PRINT("%s\n", "");
             rc = -1;
           } else {
             errno = saved_errno;
           }
         }
       } else {
-debug_print(DEBUG_FMT"set rc = 0\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "set rc = 0");
         rc = 0;
       }
 
@@ -2333,7 +2331,7 @@ debug_print(DEBUG_FMT"set rc = 0\n", DEBUG_SRC);
       if (fds[1] >= 0)            NO_INTR(sys_close(fds[1]));
       errno = saved_errno;
 
-debug_print(DEBUG_FMT"rc = %d\n", DEBUG_SRC, rc);
+DEBUG_PRINT("rc = %d\n", rc);
       if (rc < 0) {
         goto error;
       }
@@ -2347,7 +2345,7 @@ debug_print(DEBUG_FMT"rc = %d\n", DEBUG_SRC, rc);
   }
 
   ResumeAllProcessThreads(threads, pids);
-debug_print(DEBUG_FMT"fd = %d\n", DEBUG_SRC, fd);
+DEBUG_PRINT("fd = %d\n", fd);
   return fd;
 
 error:
@@ -2358,7 +2356,7 @@ error:
     errno = saved_errno;
   }
   ResumeAllProcessThreads(threads, pids);
-debug_print(DEBUG_FMT"exit -1\n", DEBUG_SRC);
+DEBUG_PRINT("%s\n", "exit -1");
   return -1;
 }
 
