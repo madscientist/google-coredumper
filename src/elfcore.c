@@ -828,6 +828,7 @@ static int CreateElfCore(void *handle,
     goto done;
 
   dump("/proc/self/maps");
+  dump("/proc/self/smaps");
 
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
@@ -853,7 +854,6 @@ DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
         int   flags;
       } mappings[num_mappings];
       io.data = io.end = 0;
-  dump("/proc/self/smaps");
       NO_INTR(io.fd = sys_open("/proc/self/smaps", O_RDONLY, 0));
 DEBUG_PRINT("open /proc/self/smaps = %d\n", io.fd);
       if (io.fd >= 0) {
@@ -879,21 +879,25 @@ DEBUG_PRINT("num_mappings = %d\n", num_mappings);
 
           memset(&mappings[i], 0, sizeof(mappings[i]));
 
+DEBUG_PRINT("\tsegment = %d\n", i);
           /* Read start and end addresses                                    */
           if (GetHexWithInitChar(&io, &mappings[i].start_address, ch) != '-' ||
               GetHex(&io, &mappings[i].end_address)   != ' ')
             goto read_error;
 
+DEBUG_PRINT("\tstart = %x, end = %x, flags = %04x\n", mappings[i].start_address, mappings[i].end_address, mappings[i].flags);
           /* Read flags                                                      */
           while ((ch = GetChar(&io)) != ' ') {
             if (ch < 0)
               goto read_error;
             mappings[i].flags = (mappings[i].flags << 1) | (ch != '-');
           }
+DEBUG_PRINT("\tflags = %04x\n", mappings[i].flags);
 
           /* Read offset                                                     */
           if ((ch = GetHex(&io, &mappings[i].offset)) != ' ')
             goto read_error;
+DEBUG_PRINT("\toffset = %08x\n", mappings[i].offset);
 
           /* Skip over device numbers, and inode number                      */
           for (j = 0; j < 2; j++) {
@@ -920,6 +924,7 @@ DEBUG_PRINT("num_mappings = %d\n", num_mappings);
           }
           is_device = dev >= dev_zero + 5 &&
                       ((ch != '\n' && ch != ' ') || *dev != '\000');
+DEBUG_PRINT("\tis_device = %d\n", is_device);
 
           /* Skip until end of line                                          */
           while (ch != '\n') {
