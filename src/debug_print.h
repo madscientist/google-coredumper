@@ -4,7 +4,7 @@
 #include <stdarg.h>
 
 #ifndef ENABLE_DEBUG_PRINT
-#define ENABLE_DEBUG_PRINT  1
+#define ENABLE_DEBUG_PRINT  0
 #endif
 
 static void debug_print(char *fmt, ...)

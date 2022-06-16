@@ -314,7 +314,7 @@ namespace {
 #define ERRNO my_errno
 #endif
 
-#define ENABLE_DEBUG_PRINT 1
+#define ENABLE_DEBUG_PRINT 0
 #include "debug_print.h"
 
 /* Re-runs fn until it doesn't cause EINTR
@@ -1005,6 +1005,15 @@ DEBUG_PRINT("\tname = %s\n", mappings[i].name);
                     if (ch == 'd') {
                       ch = GetChar(&io);
                       if (ch == 'd') {
+                        dontdump = true;
+                        break;
+                      }
+                    }
+
+                    /* check if the flag is "pf" */
+                    if (ch == 'p') {
+                      ch = GetChar(&io);
+                      if (ch == 'f') {
                         dontdump = true;
                         break;
                       }
