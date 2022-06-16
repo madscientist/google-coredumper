@@ -20,3 +20,4 @@ static void debug_print(char *fmt, ...)
 #define DEBUG_FMT  "%s:%s:%d: "
 #define DEBUG_SRC  __FILE__, __PRETTY_FUNCTION__, __LINE__
 #define DEBUG_PRINT(fmt, ...)  debug_print(DEBUG_FMT fmt, DEBUG_SRC, __VA_ARGS__)
+#define DPRINT(fmt, ...)  debug_print(fmt, __VA_ARGS__)

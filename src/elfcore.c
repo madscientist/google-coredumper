@@ -800,7 +800,7 @@ void dump(const char* file)
         if (n > 0) {
           total += n;
           buf[n] = '\0';
-          printf("%s", buf);
+          DPRINT("%s", buf);
         } else {
           DEBUG_PRINT("read %s = %d, n = %ld, errno = %d\n", file, dump_fd, n, dump_errno);
         }
