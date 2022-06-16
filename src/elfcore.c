@@ -790,14 +790,22 @@ void dump(const char* file)
   int dump_fd;
   NO_INTR(dump_fd = sys_open(file, O_RDONLY, 0));
   if (dump_fd >= 0) {
-    char buf[4096] = "";
-    int dump_errno;
-    ssize_t n = c_read(dump_fd, buf, sizeof(buf), &dump_errno);
-DEBUG_PRINT("read %s = %d, n = %ld, errno = %d\n", file, dump_fd, n, dump_errno);
-    if (n > 0) {
-      buf[n] = '\0';
-DEBUG_PRINT("start dump %s\n%s\nend dump %s\n", file, buf, file);
-    }
+    ssize_t n = 0;
+    ssize_t total = 0;
+    DEBUG_PRINT("start dump %s\n", file);
+    do {
+        char buf[4096] = "";
+        int dump_errno;
+        n = c_read(dump_fd, buf, sizeof(buf), &dump_errno);
+        if (n > 0) {
+          total += n;
+          buf[n] = '\0';
+          printf("%s", buf);
+        } else {
+          DEBUG_PRINT("read %s = %d, n = %ld, errno = %d\n", file, dump_fd, n, dump_errno);
+        }
+    } while (n > 0);
+    DEBUG_PRINT("end dump %s, size = %ld\n", file, total);
     NO_INTR(sys_close(dump_fd));
   }
 }
@@ -852,6 +860,7 @@ DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
       struct {
         size_t start_address, end_address, offset, write_size;
         int   flags;
+        char name[100];
       } mappings[num_mappings];
       io.data = io.end = 0;
       NO_INTR(io.fd = sys_open("/proc/self/smaps", O_RDONLY, 0));
@@ -879,13 +888,13 @@ DEBUG_PRINT("num_mappings = %d\n", num_mappings);
 
           memset(&mappings[i], 0, sizeof(mappings[i]));
 
-DEBUG_PRINT("\tsegment = %d\n", i);
+DEBUG_PRINT("    segment = %d\n", i);
           /* Read start and end addresses                                    */
           if (GetHexWithInitChar(&io, &mappings[i].start_address, ch) != '-' ||
               GetHex(&io, &mappings[i].end_address)   != ' ')
             goto read_error;
 
-DEBUG_PRINT("\tstart = %x, end = %x, flags = %04x\n", mappings[i].start_address, mappings[i].end_address, mappings[i].flags);
+DEBUG_PRINT("\tstart = %x, end = %x, write_size = %lu\n", mappings[i].start_address, mappings[i].end_address, mappings[i].write_size);
           /* Read flags                                                      */
           while ((ch = GetChar(&io)) != ' ') {
             if (ch < 0)
@@ -927,11 +936,17 @@ DEBUG_PRINT("\toffset = %08x\n", mappings[i].offset);
 DEBUG_PRINT("\tis_device = %d\n", is_device);
 
           /* Skip until end of line                                          */
+          int name_idx = 0;
           while (ch != '\n') {
             if (ch < 0)
               goto read_error;
             ch = GetChar(&io);
+            if (ch != '\n' && ch != ' ' && name_idx < 100) {
+              mappings[i].name[name_idx++] = ch;
+            }
           }
+          mappings[i].name[name_idx] = '\0';
+DEBUG_PRINT("\tname = %s\n", mappings[i].name);
 
           /*
            * Parse extra information from smaps.
@@ -1020,6 +1035,7 @@ DEBUG_PRINT("\tis_device = %d\n", is_device);
            * the ELF access bits
            */
           mappings[i].flags = (mappings[i].flags >> 1) & PF_MASK;
+DEBUG_PRINT("\tdrop the private/shared bit flags = %04x\n", mappings[i].flags);
 
           /* Skip leading zeroed pages (as found in the stack segment)       */
           if ((mappings[i].flags & PF_R) && !is_device) {
@@ -1027,6 +1043,7 @@ DEBUG_PRINT("\tis_device = %d\n", is_device);
                          mappings[i].end_address - mappings[i].start_address,
                          pagesize);
             mappings[i].start_address += zeros;
+DEBUG_PRINT("\tskip leading zeroed pages start = %x, end = %x\n", mappings[i].start_address, mappings[i].end_address);
           }
 
           /* Write segment content if the don't dump flag is not set, and one
@@ -1035,22 +1052,27 @@ DEBUG_PRINT("\tis_device = %d\n", is_device);
            *  - the segment is writable
            *  - the segment has anonymous pages
            */
+DEBUG_PRINT("\tdont dump = %d, is_anonymous = %d, has_anonymous_pages = %d, writable = %d\n", dontdump, is_anonymous, has_anonymous_pages, (mappings[i].flags & PF_W));
           if (!dontdump && (is_anonymous
                             || has_anonymous_pages
                             || (mappings[i].flags & PF_W) != 0)) {
             mappings[i].write_size = mappings[i].end_address
                                    - mappings[i].start_address;
+DEBUG_PRINT("\tset write_size = %lu\n", mappings[i].write_size);
           }
+DEBUG_PRINT("\twrite_size = %lu\n", mappings[i].write_size);
 
           /* Remove mapping, if it was not readable, or completely zero
            * anyway. The former is usually the case of stack guard pages, and
            * the latter occasionally happens for unused memory.
            * Also, be careful not to touch mapped devices.
            */
+DEBUG_PRINT("\tis readable = %d, start == end = %d, is_device = %d\n", (mappings[i].flags & PF_R), ( mappings[i].start_address == mappings[i].end_address), is_device);
           if ((mappings[i].flags & PF_R) == 0 ||
               mappings[i].start_address == mappings[i].end_address ||
               is_device) {
             num_mappings--;
+DEBUG_PRINT("\tdecrease num_mappings = %d\n", num_mappings);
           } else {
             i++;
           }
