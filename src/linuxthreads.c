@@ -85,7 +85,7 @@ static char *local_itoa(char *buf, int i) {
   }
 }
 
-#define ENABLE_DEBUG_PRINT 0
+#define ENABLE_DEBUG_PRINT
 #include "debug_print.h"
 
 /* Wrapper around clone() that runs "fn" on the same stack as the
@@ -273,8 +273,6 @@ static void ListerThread(struct ListerParams *args) {
   int                max_threads = 0, sig;
   struct kernel_stat marker_sb, proc_sb;
   stack_t            altstack;
-
-  DEBUG_PRINT("&found_parent = %p\n", &found_parent);
 
   /* Create "marker" that we can use to detect threads sharing the same
    * address space and the same file handles. By setting the FD_CLOEXEC flag
@@ -688,7 +686,7 @@ int ListAllProcessThreads(void *parameter,
     }
   }
 
- DEBUG_PRINT("esult = %d, err = %d\n", args.result, args.err);
+ DEBUG_PRINT("result = %d, err = %d\n", args.result, args.err);
   /* Restore the "dumpable" state of the process                             */
 failed:
   #if defined (__aarch64__)

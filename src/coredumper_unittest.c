@@ -53,6 +53,9 @@
 #include "google/coredumper.h"
 #include "linuxthreads.h"
 
+#define ENABLE_DEBUG_PRINT
+#include "debug_print.h"
+
 /* The gdb binary to use on different architectures. Change these if you have
  * specific debuggers for different architectures.
  */
@@ -172,6 +175,15 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
    * the test to fail. To prevent this, ignore readelf stderr (using '2>&1'
    * does not suffice when stdout is fully buffered).
    */
+DEBUG_PRINT("cat /proc/%d/maps &&"
+            "%s %s <\"%s%s\" >core.%d &&"
+            "%s -a core.%d 2>/dev/null; "
+            "rm -f core.%d; "
+            "(set +x; echo DONE)\n",
+            getpid(), decompress, args, filename, suffix,
+            getpid(), getReadelf(),
+            getpid(), getpid());
+
   int  rc = fprintf(input,
                     "cat /proc/%d/maps &&"
                     "%s %s <\"%s%s\" >core.%d &&"
@@ -822,6 +834,7 @@ void TestCoreDump() {
     assert(!strcmp(compressor->suffix, ".gz"));
     CheckWithReadElf(input, output, core_test, compressor->suffix,
                      compressor->compressor, "-d");
+    exit(0);
     assert(!unlink(core_test_gz));
 
     /* Check wether fallback to uncompressed core files works                */

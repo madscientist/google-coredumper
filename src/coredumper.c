@@ -117,7 +117,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
 }
 #endif
 
-#define ENABLE_DEBUG_PRINT 0
+// #define ENABLE_DEBUG_PRINT
 #include "debug_print.h"
 
 /* Internal helper method used by GetCoreDump().

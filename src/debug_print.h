@@ -3,13 +3,9 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#ifndef ENABLE_DEBUG_PRINT
-#define ENABLE_DEBUG_PRINT  0
-#endif
-
 static void debug_print(char *fmt, ...)
 {
-#if ENABLE_DEBUG_PRINT
+#ifdef ENABLE_DEBUG_PRINT
    va_list arg_ptr;
    va_start(arg_ptr, fmt);
    vprintf(fmt, arg_ptr);

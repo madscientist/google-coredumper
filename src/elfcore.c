@@ -314,7 +314,7 @@ namespace {
 #define ERRNO my_errno
 #endif
 
-#define ENABLE_DEBUG_PRINT 0
+#define ENABLE_DEBUG_PRINT
 #include "debug_print.h"
 
 /* Re-runs fn until it doesn't cause EINTR
@@ -673,20 +673,45 @@ static int WriteThreadRegs(void *handle,
   nhdr.n_type   = NT_PRSTATUS;
   prstatus->pr_pid = pid;
   prstatus->pr_reg = *regs;
-  if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-      writer(handle, "CORE\0\0\0\0", 8) != 8 ||
-      writer(handle, prstatus, sizeof(struct prstatus)) !=
-      sizeof(struct prstatus)) {
+
+  ssize_t writer_rc = writer(handle, &nhdr, sizeof(Nhdr));
+  DEBUG_PRINT("write hdr = %ld, sizeof(Nhdr)\n", writer_rc, sizeof(Nhdr));
+  if (writer_rc != sizeof(Nhdr)) {
+    return -1;
+  }
+
+  writer_rc = writer(handle, "CORE\0\0\0\0", 8);
+  DEBUG_PRINT("write CORE = %ld\n", writer_rc);
+  if (writer_rc != 8) {
+    return -1;
+  }
+
+  writer_rc = writer(handle, prstatus, sizeof(struct prstatus));
+  DEBUG_PRINT("write prstatus = %ld, sizeof(struct prstatus)\n", writer_rc, sizeof(struct prstatus));
+  if (writer_rc != sizeof(struct prstatus)) {
     return -1;
   }
 
   /* FPU registers                                                           */
+  DEBUG_PRINT("\n", "FPU registers");
   nhdr.n_descsz = sizeof(struct fpregs);
   nhdr.n_type   = NT_FPREGSET;
-  if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-      writer(handle, "CORE\0\0\0\0", 8) != 8 ||
-      writer(handle, fpregs, sizeof(struct fpregs)) !=
-      sizeof(struct fpregs)) {
+
+  writer_rc = writer(handle, &nhdr, sizeof(Nhdr));
+  DEBUG_PRINT("write hdr = %ld, sizeof(Nhdr)\n", writer_rc, sizeof(Nhdr));
+  if (writer_rc != sizeof(Nhdr)) {
+    return -1;
+  }
+
+  writer_rc = writer(handle, "CORE\0\0\0\0", 8);
+  DEBUG_PRINT("write CORE = %ld\n", writer_rc);
+  if (writer_rc != 8) {
+    return -1;
+  }
+
+  writer_rc = writer(handle, fpregs, sizeof(struct fpregs));
+  DEBUG_PRINT("write fpregs = %ld, sizeof(struct fpregs)\n", writer_rc, sizeof(struct fpregs));
+  if (writer_rc != sizeof(struct fpregs)) {
     return -1;
   }
 
@@ -1323,7 +1348,6 @@ DEBUG_PRINT("user = %p\n", user);
             }
           }
           if (num_auxv) {
-DEBUG_PRINT("num_auxv = %lu\n", num_auxv);
             /* Dump entire auxv[] array as NT_AUXV note, to match what
              * kernel code in fs/binfmt_elf.c does.
              * Without this, gdb can't unwind through vdso on i686.
@@ -1344,13 +1368,11 @@ DEBUG_PRINT("num_auxv = %lu\n", num_auxv);
               ssize_t nread;
               auxv_t auxv;
               NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
-DEBUG_PRINT("sys_read = %d, fd= %d, sizeof(auxv_t) = %ld\n", nread, fd, sizeof(auxv_t));
               if (nread != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
               }
               int rc1 = writer(handle, &auxv, sizeof(auxv_t));
-DEBUG_PRINT("writer = %d, handle = %p, sizeof(auxv_t) = %ld\n", rc1, handle, sizeof(auxv_t));
               if (rc1 != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
@@ -1901,9 +1923,19 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     hasSSE = 0;
     #elif defined(__aarch64__)
     memset(scratch, 0xFF, sizeof(scratch));
+    for (size_t i = 0; i < sizeof(scratch);) {
+      for (int j = 0; j < 10; i += sizeof(size_t), ++j) {
+        DPRINT("0x%08x ", (size_t)scratch[i]);
+      }
+      DPRINT("\n");
+    }
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
     long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
+    DEBUG_PRINT("PTRACE_GETREGSET = %d\n", ptrace_rc);
     if (ptrace_rc == 0) {
+      for (size_t i = 0; i < sizeof(scratch); i += sizeof(size_t)) {
+          DPRINT("0x%08x\n", scratch[i]);
+      }
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
