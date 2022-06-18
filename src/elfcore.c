@@ -452,9 +452,9 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
   const unsigned char *buf = (const unsigned char *)void_buf;
   struct WriterFds *fds    = (struct WriterFds *)f;
   size_t len               = bytes;
-DEBUG_PRINT("ENTER: fds->max_length = %ld, bytes = %ld, buf = %p\n", fds->max_length, bytes, void_buf);
+// DEBUG_PRINT("ENTER: fds->max_length = %ld, bytes = %ld, buf = %p\n", fds->max_length, bytes, void_buf);
   while (fds->max_length > 0 && len > 0) {
-DEBUG_PRINT("bytes = %ld, len = %ld\n", bytes, len);
+// DEBUG_PRINT("bytes = %ld, len = %ld\n", bytes, len);
     ssize_t rc;
     struct kernel_pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
                                       { fds->write_fd, POLLOUT, 0 } };
@@ -468,7 +468,7 @@ DEBUG_PRINT("bytes = %ld, len = %ld\n", bytes, len);
     }
 
     if (nfds > 0 && (pfd[0].revents & POLLIN)) {
-DEBUG_PRINT("%s\n", "Read from compressor data. Copy to output file");
+// DEBUG_PRINT("%s\n", "Read from compressor data. Copy to output file");
       /* Some compressed data has become available. Copy to output file.     */
       char scratch[4096];
       for (;;) {
@@ -481,7 +481,7 @@ DEBUG_PRINT("%s\n", "Read from compressor data. Copy to output file");
         errno = -1;
 
         NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
-DEBUG_PRINT("sys_read = %d, compressed_fd = %d, l = %ld\n", rc, fds->compressed_fd, l);
+// DEBUG_PRINT("sys_read = %d, compressed_fd = %d, l = %ld\n", rc, fds->compressed_fd, l);
         if (rc < 0) {
           /* The file handle is set to be non-blocking, so we loop until
            * read() returns -1.
@@ -489,23 +489,23 @@ DEBUG_PRINT("sys_read = %d, compressed_fd = %d, l = %ld\n", rc, fds->compressed_
           if (errno == EAGAIN) {
             break;
           }
-DEBUG_PRINT("return rc = %d\n", -1);
+// DEBUG_PRINT("return rc = %d\n", -1);
           return -1;
         } else if (rc == 0) {
           fds->max_length = 0;
-DEBUG_PRINT("set max_length %lu\n", fds->max_length);
+// DEBUG_PRINT("set max_length %lu\n", fds->max_length);
           break;
         }
         ssize_t read_rc = rc;
         rc = c_write(fds->out_fd, scratch, rc, &errno);
-DEBUG_PRINT("c_write = %d, out_fd = %d, length(rc) = %ld\n", rc, fds->out_fd, read_rc);
+// DEBUG_PRINT("c_write = %d, out_fd = %d, length(rc) = %ld\n", rc, fds->out_fd, read_rc);
         if (rc <= 0) {
-DEBUG_PRINT("return rc = %d\n", -1);
+// DEBUG_PRINT("return rc = %d\n", -1);
           return -1;
         }
-DEBUG_PRINT("fds->max_length(%lu) - rc(%ld) = ", fds->max_length, rc);
+// DEBUG_PRINT("fds->max_length(%lu) - rc(%ld) = ", fds->max_length, rc);
         fds->max_length -= rc;
-DEBUG_PRINT("%lu\n", fds->max_length);
+// DEBUG_PRINT("%lu\n", fds->max_length);
       }
       nfds--;
     }
@@ -514,7 +514,7 @@ DEBUG_PRINT("%lu\n", fds->max_length);
        * receive more.
        */
       NO_INTR(rc = sys_write(fds->write_fd, buf, len));
-DEBUG_PRINT("Write to compressor: rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", rc, fds->write_fd, len, errno, buf);
+// DEBUG_PRINT("Write to compressor: rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", rc, fds->write_fd, len, errno, buf);
       if (rc < 0 && errno != EAGAIN) {
         return -1;
       }
@@ -522,7 +522,7 @@ DEBUG_PRINT("Write to compressor: rc = %d, write_fd = %d, len = %d, errno = %d, 
       len -= rc;
     }
   }
-DEBUG_PRINT("bytes - len = %ld\n", bytes - len);
+// DEBUG_PRINT("bytes - len = %ld\n", bytes - len);
   return bytes - len;
 }
 
@@ -542,7 +542,7 @@ static int FlushPipe(struct WriterFds *fds) {
     }
     if (l > 0) {
       NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
-DEBUG_PRINT("sys_read = %d, compressed_fd= %d, l = %ld\n", rc, fds->compressed_fd, l);
+// DEBUG_PRINT("sys_read = %d, compressed_fd= %d, l = %ld\n", rc, fds->compressed_fd, l);
       if (rc < 0) {
         return -1;
       } else if (rc == 0) {
@@ -693,7 +693,7 @@ static int WriteThreadRegs(void *handle,
   }
 
   /* FPU registers                                                           */
-  DEBUG_PRINT("\n", "FPU registers");
+  DEBUG_PRINT("%s\n", "FPU registers");
   nhdr.n_descsz = sizeof(struct fpregs);
   nhdr.n_type   = NT_FPREGSET;
 
@@ -812,6 +812,7 @@ static Ehdr *SanitizeVDSO(Ehdr *ehdr, size_t start, size_t end) {
 
 void dump(const char* file)
 {
+  #if 0
   int dump_fd;
   NO_INTR(dump_fd = sys_open(file, O_RDONLY, 0));
   if (dump_fd >= 0) {
@@ -833,6 +834,7 @@ void dump(const char* file)
     DEBUG_PRINT("end dump %s, size = %ld\n", file, total);
     NO_INTR(sys_close(dump_fd));
   }
+  #endif
 }
 
 /* This function is invoked from a separate process. It has access to a
@@ -1923,22 +1925,20 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     hasSSE = 0;
     #elif defined(__aarch64__)
     memset(scratch, 0xFF, sizeof(scratch));
-    for (size_t i = 0; i < sizeof(scratch);) {
-      for (int j = 0; j < 10; i += sizeof(size_t), ++j) {
-        DPRINT("0x%08x ", (size_t)scratch[i]);
-      }
-      DPRINT("\n");
-    }
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
     long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
-    DEBUG_PRINT("PTRACE_GETREGSET = %d\n", ptrace_rc);
+    DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
     if (ptrace_rc == 0) {
-      for (size_t i = 0; i < sizeof(scratch); i += sizeof(size_t)) {
-          DPRINT("0x%08x\n", scratch[i]);
+      for (size_t i = 0; i < scratch_iovec.iov_len;) {
+          for (int j = 0; i < scratch_iovec.iov_len && j < 64; ++i, ++j) {
+              DPRINT("%02x ", scratch[i]);
+          }
+          DPRINT("%s", "\n");
       }
-      memcpy(thread_regs + i, scratch, sizeof(struct regs));
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
+      } else {
+        memcpy(thread_regs + i, scratch, sizeof(struct regs));
       }
 #if 0
       memset(scratch, 0xFF, sizeof(scratch));
