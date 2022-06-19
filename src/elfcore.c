@@ -1942,6 +1942,7 @@ DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_l
       }
 #if 1
       memset(scratch, 0xFF, sizeof(scratch));
+      scratch_iovec.iov_len = sizeof(scratch);
       ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec);
 DEBUG_PRINT("PTRACE_GETREGSET(FP) = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
       if (ptrace_rc == 0) {
