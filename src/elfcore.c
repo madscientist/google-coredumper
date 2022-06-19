@@ -1927,7 +1927,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     memset(scratch, 0xFF, sizeof(scratch));
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
     long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
-    DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
+DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
     if (ptrace_rc == 0) {
       for (size_t i = 0; i < scratch_iovec.iov_len;) {
           for (int j = 0; i < scratch_iovec.iov_len && j < 64; ++i, ++j) {
@@ -1940,12 +1940,17 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       } else {
         memcpy(thread_regs + i, scratch, sizeof(struct regs));
       }
-#if 0
+#if 1
       memset(scratch, 0xFF, sizeof(scratch));
-      ptrace_rc = sys_ptrace(PTRACE_GETFPXREGS, pids[i], NT_PRXFPREG, &scratch_iovec);
-DEBUG_PRINT("rc = %d errno = %d\n", ptrace_rc, errno);
+      ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec);
+DEBUG_PRINT("PTRACE_GETREGSET(FP) = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
       if (ptrace_rc == 0) {
-DEBUG_PRINT("%s\n", "");
+        for (size_t i = 0; i < scratch_iovec.iov_len;) {
+            for (int j = 0; i < scratch_iovec.iov_len && j < 64; ++i, ++j) {
+                DPRINT("%02x ", scratch[i]);
+            }
+            DPRINT("%s", "\n");
+        }
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
         #if defined(__i386__) && !defined( __x86_64__)
