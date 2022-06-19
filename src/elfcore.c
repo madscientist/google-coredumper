@@ -693,7 +693,7 @@ static int WriteThreadRegs(void *handle,
   }
 
   /* FPU registers                                                           */
-  DEBUG_PRINT("%s\n", "FPU registers");
+  DEBUG_PRINT("FPU registers: sizeof fpregs = %lu\n", sizeof(struct fpregs));
   nhdr.n_descsz = sizeof(struct fpregs);
   nhdr.n_type   = NT_FPREGSET;
 
