@@ -53,9 +53,6 @@
 #include "google/coredumper.h"
 #include "linuxthreads.h"
 
-#define ENABLE_DEBUG_PRINT
-#include "debug_print.h"
-
 /* The gdb binary to use on different architectures. Change these if you have
  * specific debuggers for different architectures.
  */

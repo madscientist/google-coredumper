@@ -85,9 +85,6 @@ static char *local_itoa(char *buf, int i) {
   }
 }
 
-// #define ENABLE_DEBUG_PRINT
-#include "debug_print.h"
-
 /* Wrapper around clone() that runs "fn" on the same stack as the
  * caller! Unlike fork(), the cloned thread shares the same address space.
  * The caller must be careful to use only minimal amounts of stack until

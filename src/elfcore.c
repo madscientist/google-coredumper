@@ -309,9 +309,6 @@ namespace {
 #define ERRNO my_errno
 #endif
 
-#define ENABLE_DEBUG_PRINT
-#include "debug_print.h"
-
 /* Re-runs fn until it doesn't cause EINTR
  */
 #define NO_INTR(fn)    do {} while ((fn) < 0 && errno == EINTR)
