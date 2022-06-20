@@ -175,15 +175,6 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
    * the test to fail. To prevent this, ignore readelf stderr (using '2>&1'
    * does not suffice when stdout is fully buffered).
    */
-DEBUG_PRINT("cat /proc/%d/maps &&"
-            "%s %s <\"%s%s\" >core.%d &&"
-            "%s -a core.%d 2>/dev/null; "
-            "rm -f core.%d; "
-            "(set +x; echo DONE)\n",
-            getpid(), decompress, args, filename, suffix,
-            getpid(), getReadelf(),
-            getpid(), getpid());
-
   int  rc = fprintf(input,
                     "cat /proc/%d/maps &&"
                     "%s %s <\"%s%s\" >core.%d &&"
@@ -891,7 +882,7 @@ void TestCoreDump() {
     CheckWithReadElf(input, output, core_test, "", "cat", "");
     CheckWithGDB(input, output, core_test, &dummy, cmp);
 
-    // unlink(core_test);
+    unlink(core_test);
   }
 
   /* Stop our threads                                                        */

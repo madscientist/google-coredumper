@@ -416,7 +416,6 @@ struct WriterFds {
  */
 static int PipeDone(void *f) {
   struct WriterFds *fds = (struct WriterFds *)f;
-DEBUG_PRINT("fds->max_length = %ld\n", fds->max_length);
   return fds->max_length == 0;
 }
 
@@ -445,23 +444,18 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
   const unsigned char *buf = (const unsigned char *)void_buf;
   struct WriterFds *fds    = (struct WriterFds *)f;
   size_t len               = bytes;
-// DEBUG_PRINT("ENTER: fds->max_length = %ld, bytes = %ld, buf = %p\n", fds->max_length, bytes, void_buf);
   while (fds->max_length > 0 && len > 0) {
-// DEBUG_PRINT("bytes = %ld, len = %ld\n", bytes, len);
     ssize_t rc;
     struct kernel_pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
                                       { fds->write_fd, POLLOUT, 0 } };
     int nfds = sys_poll(pfd, 2, -1);
 
-// DEBUG_PRINT("compressed_fd = %d, write_fd = %d, errno = %d\n", fds->compressed_fd, fds->write_fd, errno);
-// DEBUG_PRINT("nfds = %d\n", nfds);
     if (nfds < 0) {
       /* Abort on fatal unexpected I/O errors.                               */
       break;
     }
 
     if (nfds > 0 && (pfd[0].revents & POLLIN)) {
-// DEBUG_PRINT("%s\n", "Read from compressor data. Copy to output file");
       /* Some compressed data has become available. Copy to output file.     */
       char scratch[4096];
       for (;;) {
@@ -474,7 +468,6 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
         errno = -1;
 
         NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
-// DEBUG_PRINT("sys_read = %d, compressed_fd = %d, l = %ld\n", rc, fds->compressed_fd, l);
         if (rc < 0) {
           /* The file handle is set to be non-blocking, so we loop until
            * read() returns -1.
@@ -482,23 +475,17 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
           if (errno == EAGAIN) {
             break;
           }
-// DEBUG_PRINT("return rc = %d\n", -1);
           return -1;
         } else if (rc == 0) {
           fds->max_length = 0;
-// DEBUG_PRINT("set max_length %lu\n", fds->max_length);
           break;
         }
         ssize_t read_rc = rc;
         rc = c_write(fds->out_fd, scratch, rc, &errno);
-// DEBUG_PRINT("c_write = %d, out_fd = %d, length(rc) = %ld\n", rc, fds->out_fd, read_rc);
         if (rc <= 0) {
-// DEBUG_PRINT("return rc = %d\n", -1);
           return -1;
         }
-// DEBUG_PRINT("fds->max_length(%lu) - rc(%ld) = ", fds->max_length, rc);
         fds->max_length -= rc;
-// DEBUG_PRINT("%lu\n", fds->max_length);
       }
       nfds--;
     }
@@ -507,7 +494,6 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
        * receive more.
        */
       NO_INTR(rc = sys_write(fds->write_fd, buf, len));
-// DEBUG_PRINT("Write to compressor: rc = %d, write_fd = %d, len = %d, errno = %d, buf = %p\n", rc, fds->write_fd, len, errno, buf);
       if (rc < 0 && errno != EAGAIN) {
         return -1;
       }
@@ -515,7 +501,6 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
       len -= rc;
     }
   }
-// DEBUG_PRINT("bytes - len = %ld\n", bytes - len);
   return bytes - len;
 }
 
@@ -535,7 +520,6 @@ static int FlushPipe(struct WriterFds *fds) {
     }
     if (l > 0) {
       NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
-// DEBUG_PRINT("sys_read = %d, compressed_fd= %d, l = %ld\n", rc, fds->compressed_fd, l);
       if (rc < 0) {
         return -1;
       } else if (rc == 0) {
@@ -661,7 +645,6 @@ static int WriteThreadRegs(void *handle,
   Nhdr nhdr;
   memset(&nhdr, 0, sizeof(Nhdr));
   /* Process status and integer registers                                    */
-  DEBUG_PRINT("Registers: sizeof prstatus = %lu\n", sizeof(struct prstatus));
   nhdr.n_namesz = 5;
   nhdr.n_descsz = sizeof(struct prstatus);
   nhdr.n_type   = NT_PRSTATUS;
@@ -669,42 +652,35 @@ static int WriteThreadRegs(void *handle,
   prstatus->pr_reg = *regs;
 
   ssize_t writer_rc = writer(handle, &nhdr, sizeof(Nhdr));
-  DEBUG_PRINT("write hdr = %ld, sizeof(Nhdr)\n", writer_rc, sizeof(Nhdr));
   if (writer_rc != sizeof(Nhdr)) {
     return -1;
   }
 
   writer_rc = writer(handle, "CORE\0\0\0\0", 8);
-  DEBUG_PRINT("write CORE = %ld\n", writer_rc);
   if (writer_rc != 8) {
     return -1;
   }
 
   writer_rc = writer(handle, prstatus, sizeof(struct prstatus));
-  DEBUG_PRINT("write prstatus = %ld, sizeof(struct prstatus)\n", writer_rc, sizeof(struct prstatus));
   if (writer_rc != sizeof(struct prstatus)) {
     return -1;
   }
 
   /* FPU registers                                                           */
-  DEBUG_PRINT("FPU registers: sizeof fpregs = %lu\n", sizeof(struct fpregs));
   nhdr.n_descsz = sizeof(struct fpregs);
   nhdr.n_type   = NT_FPREGSET;
 
   writer_rc = writer(handle, &nhdr, sizeof(Nhdr));
-  DEBUG_PRINT("write hdr = %ld, sizeof(Nhdr)\n", writer_rc, sizeof(Nhdr));
   if (writer_rc != sizeof(Nhdr)) {
     return -1;
   }
 
   writer_rc = writer(handle, "CORE\0\0\0\0", 8);
-  DEBUG_PRINT("write CORE = %ld\n", writer_rc);
   if (writer_rc != 8) {
     return -1;
   }
 
   writer_rc = writer(handle, fpregs, sizeof(struct fpregs));
-  DEBUG_PRINT("write fpregs = %ld, sizeof(struct fpregs)\n", writer_rc, sizeof(struct fpregs));
   if (writer_rc != sizeof(struct fpregs)) {
     return -1;
   }
@@ -812,7 +788,6 @@ void dump(const char* file)
   if (dump_fd >= 0) {
     ssize_t n = 0;
     ssize_t total = 0;
-    DEBUG_PRINT("start dump %s\n", file);
     do {
         char buf[4096] = "";
         int dump_errno;
@@ -822,10 +797,8 @@ void dump(const char* file)
           buf[n] = '\0';
           DPRINT("%s", buf);
         } else {
-          DEBUG_PRINT("read %s = %d, n = %ld, errno = %d\n", file, dump_fd, n, dump_errno);
         }
     } while (n > 0);
-    DEBUG_PRINT("end dump %s, size = %ld\n", file, total);
     NO_INTR(sys_close(dump_fd));
   }
   #endif
@@ -861,7 +834,6 @@ static int CreateElfCore(void *handle,
 
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
-DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
   if (io.fd >= 0) {
     int i, ch;
     while ((ch = GetChar(&io)) >= 0) {
@@ -885,7 +857,6 @@ DEBUG_PRINT("open /proc/self/maps = %d\n", io.fd);
       } mappings[num_mappings];
       io.data = io.end = 0;
       NO_INTR(io.fd = sys_open("/proc/self/smaps", O_RDONLY, 0));
-DEBUG_PRINT("open /proc/self/smaps = %d\n", io.fd);
       if (io.fd >= 0) {
         size_t note_align;
         size_t num_extra_phdrs = 0;
@@ -898,7 +869,6 @@ DEBUG_PRINT("open /proc/self/smaps = %d\n", io.fd);
          * "^[0-9A-F]*-[0-9A-F]* [r-][w-][x-][p-] [0-9A-F]*.*$"
          * At the start of each iteration, ch contains the first character.
          */
-DEBUG_PRINT("num_mappings = %d\n", num_mappings);
         for (i = 0; i < num_mappings;) {
           static const char * const dev_zero = "/dev/zero";
           const char *dev = dev_zero;
@@ -909,25 +879,21 @@ DEBUG_PRINT("num_mappings = %d\n", num_mappings);
 
           memset(&mappings[i], 0, sizeof(mappings[i]));
 
-DEBUG_PRINT("    segment = %d\n", i);
           /* Read start and end addresses                                    */
           if (GetHexWithInitChar(&io, &mappings[i].start_address, ch) != '-' ||
               GetHex(&io, &mappings[i].end_address)   != ' ')
             goto read_error;
 
-DEBUG_PRINT("\tstart = %x, end = %x, write_size = %lu\n", mappings[i].start_address, mappings[i].end_address, mappings[i].write_size);
           /* Read flags                                                      */
           while ((ch = GetChar(&io)) != ' ') {
             if (ch < 0)
               goto read_error;
             mappings[i].flags = (mappings[i].flags << 1) | (ch != '-');
           }
-DEBUG_PRINT("\tflags = %04x\n", mappings[i].flags);
 
           /* Read offset                                                     */
           if ((ch = GetHex(&io, &mappings[i].offset)) != ' ')
             goto read_error;
-DEBUG_PRINT("\toffset = %08x\n", mappings[i].offset);
 
           /* Skip over device numbers, and inode number                      */
           for (j = 0; j < 2; j++) {
@@ -954,7 +920,6 @@ DEBUG_PRINT("\toffset = %08x\n", mappings[i].offset);
           }
           is_device = dev >= dev_zero + 5 &&
                       ((ch != '\n' && ch != ' ') || *dev != '\000');
-DEBUG_PRINT("\tis_device = %d\n", is_device);
 
           /* Skip until end of line                                          */
           int name_idx = 0;
@@ -967,7 +932,6 @@ DEBUG_PRINT("\tis_device = %d\n", is_device);
             }
           }
           mappings[i].name[name_idx] = '\0';
-DEBUG_PRINT("\tname = %s\n", mappings[i].name);
 
           /*
            * Parse extra information from smaps.
@@ -1065,7 +1029,6 @@ DEBUG_PRINT("\tname = %s\n", mappings[i].name);
            * the ELF access bits
            */
           mappings[i].flags = (mappings[i].flags >> 1) & PF_MASK;
-DEBUG_PRINT("\tdrop the private/shared bit flags = %04x\n", mappings[i].flags);
 
           /* Skip leading zeroed pages (as found in the stack segment)       */
           if ((mappings[i].flags & PF_R) && !is_device) {
@@ -1073,7 +1036,6 @@ DEBUG_PRINT("\tdrop the private/shared bit flags = %04x\n", mappings[i].flags);
                          mappings[i].end_address - mappings[i].start_address,
                          pagesize);
             mappings[i].start_address += zeros;
-DEBUG_PRINT("\tskip leading zeroed pages start = %x, end = %x\n", mappings[i].start_address, mappings[i].end_address);
           }
 
           /* Write segment content if the don't dump flag is not set, and one
@@ -1082,34 +1044,28 @@ DEBUG_PRINT("\tskip leading zeroed pages start = %x, end = %x\n", mappings[i].st
            *  - the segment is writable
            *  - the segment has anonymous pages
            */
-DEBUG_PRINT("\tdont dump = %d, is_anonymous = %d, has_anonymous_pages = %d, writable = %d\n", dontdump, is_anonymous, has_anonymous_pages, (mappings[i].flags & PF_W));
           if (!dontdump && (is_anonymous
                             || has_anonymous_pages
                             || (mappings[i].flags & PF_W) != 0)) {
             mappings[i].write_size = mappings[i].end_address
                                    - mappings[i].start_address;
-DEBUG_PRINT("\tset write_size = %lu\n", mappings[i].write_size);
           }
-DEBUG_PRINT("\twrite_size = %lu\n", mappings[i].write_size);
 
           /* Remove mapping, if it was not readable, or completely zero
            * anyway. The former is usually the case of stack guard pages, and
            * the latter occasionally happens for unused memory.
            * Also, be careful not to touch mapped devices.
            */
-DEBUG_PRINT("\tis readable = %d, start == end = %d, is_device = %d\n", (mappings[i].flags & PF_R), ( mappings[i].start_address == mappings[i].end_address), is_device);
           if ((mappings[i].flags & PF_R) == 0 ||
               mappings[i].start_address == mappings[i].end_address ||
               is_device) {
             num_mappings--;
-DEBUG_PRINT("\tdecrease num_mappings = %d\n", num_mappings);
           } else {
             i++;
           }
         }
         NO_INTR(sys_close(io.fd));
 
-DEBUG_PRINT("vdso.address = %p\n", vdso.address);
         if (vdso.address) {
           /* Sanity checks.                                                  */
           for (i = 0; i < num_mappings; i++) {
@@ -1163,7 +1119,6 @@ DEBUG_PRINT("vdso.address = %p\n", vdso.address);
           ehdr.e_phnum    = num_mappings + num_extra_phdrs + 1;
           ehdr.e_shentsize= sizeof(Shdr);
           ssize_t written = writer(handle, &ehdr, sizeof(Ehdr));
-DEBUG_PRINT("Write out the ELF header: written = %ld sizeof(Ehdr) = %ld\n", written, sizeof(Ehdr));
           if (written != sizeof(Ehdr)) {
             goto done;
           }
@@ -1209,7 +1164,6 @@ DEBUG_PRINT("Write out the ELF header: written = %ld sizeof(Ehdr) = %ld\n", writ
           phdr.p_offset   = offset;
           phdr.p_filesz   = filesz;
           ssize_t written = writer(handle, &phdr, sizeof(Phdr));
-DEBUG_PRINT("Write program headers: written = %ld, sizeof(Phdr) = %lu\n", written, sizeof(Phdr));
           if (written != sizeof(Phdr)) {
             goto done;
           }
@@ -1282,7 +1236,6 @@ DEBUG_PRINT("Write program headers: written = %ld, sizeof(Phdr) = %lu\n", writte
             }
           }
 
-DEBUG_PRINT("num_mappings = %d\n", num_mappings);
           for (i = 0; i < num_mappings; i++) {
             offset       += filesz;
             filesz        = mappings[i].end_address -mappings[i].start_address;
@@ -1294,12 +1247,10 @@ DEBUG_PRINT("num_mappings = %d\n", num_mappings);
             phdr.p_filesz = filesz;
             phdr.p_flags  = mappings[i].flags & PF_MASK;
             ssize_t written = writer(handle, &phdr, sizeof(Phdr));
-DEBUG_PRINT("Write mapping headers: written = %ld, sizeof(Phdr) = %lu\n", written, sizeof(Phdr));
             if (written != sizeof(Phdr)) {
               goto done;
             }
           }
-DEBUG_PRINT("vdso.ehdr = %p\n", vdso.ehdr);
           if (vdso.ehdr) {
             Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
             for (i = 0; i < vdso.ehdr->e_phnum; i++) {
@@ -1310,7 +1261,6 @@ DEBUG_PRINT("vdso.ehdr = %p\n", vdso.ehdr);
                 phdr.p_offset = offset;
                 phdr.p_paddr  = 0; /* match other core phdrs                 */
                 ssize_t written = writer(handle, &phdr, sizeof(Phdr));
-DEBUG_PRINT("Write vdso.ehdr headers: written = %ld, sizeof(Phdr) = %lu\n", written, sizeof(Phdr));
                 if (written != sizeof(Phdr)) {
                   goto done;
                 }
@@ -1319,7 +1269,6 @@ DEBUG_PRINT("Write vdso.ehdr headers: written = %ld, sizeof(Phdr) = %lu\n", writ
           }
         }
         /* Write note section                                                */
-DEBUG_PRINT("%s\n", "Write note section");
         /* scope */ {
           Nhdr nhdr;
           memset(&nhdr, 0, sizeof(Nhdr));
@@ -1333,7 +1282,6 @@ DEBUG_PRINT("%s\n", "Write note section");
             goto done;
           }
           if (user) {
-DEBUG_PRINT("user = %p\n", user);
             nhdr.n_descsz   = sizeof(struct core_user);
             nhdr.n_type     = NT_PRXREG;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
@@ -1375,7 +1323,6 @@ DEBUG_PRINT("user = %p\n", user);
               }
             }
           }
-DEBUG_PRINT("num_threads = %d\n", num_threads);
           /* The order of threads in the output matters to gdb:
            * it assumes that the first one is the one that crashed.
            * Make it easier for the end-user to find crashing thread
@@ -1385,7 +1332,6 @@ DEBUG_PRINT("num_threads = %d\n", num_threads);
             if (pids[i] == main_pid) {
               int rc_wtr = WriteThreadRegs(handle, writer, prstatus, pids[i],
                                   regs+i, fpregs+i, fpxregs+i);
-DEBUG_PRINT("WriteThreadRegs: pids[%d](%d) == main_pid(%d) rc = %d\n", i, pids[i], main_pid, rc_wtr);
               if (rc_wtr) {
                 goto done;
               }
@@ -1396,7 +1342,6 @@ DEBUG_PRINT("WriteThreadRegs: pids[%d](%d) == main_pid(%d) rc = %d\n", i, pids[i
             if (pids[i] != main_pid) {
               int rc_wtr = WriteThreadRegs(handle, writer, prstatus, pids[i],
                                   regs+i, fpregs+i, fpxregs+i);
-DEBUG_PRINT("WriteThreadRegs: pids[%d](%d) != main_pid(%d) rc = %d\n", i, pids[i], main_pid, rc_wtr);
               if (rc_wtr) {
                 goto done;
               }
@@ -1404,7 +1349,6 @@ DEBUG_PRINT("WriteThreadRegs: pids[%d](%d) != main_pid(%d) rc = %d\n", i, pids[i
           }
 
           /* Write user provided notes                                       */
-DEBUG_PRINT("%s\n", "Write user provided notes");
           for (i = 0; i < extra_notes_count; i++) {
             size_t name_align = 0, description_align = 0;
             const char scratch[3] = {0,0,0};
@@ -1419,12 +1363,10 @@ DEBUG_PRINT("%s\n", "Write user provided notes");
               description_align = 4 - nhdr.n_descsz % 4;
             }
             /* Write the note header                                         */
-DEBUG_PRINT("%s\n", "Write the note header");
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr)) {
               goto done;
             }
             /* Write the note name and padding                               */
-DEBUG_PRINT("%s\n", "Write the note name and padding");
             if (writer(handle, extra_notes[i].name, nhdr.n_namesz)
                   != nhdr.n_namesz) {
               goto done;
@@ -1433,7 +1375,6 @@ DEBUG_PRINT("%s\n", "Write the note name and padding");
               goto done;
             }
             /* Write the note description and padding                        */
-DEBUG_PRINT("%s\n", "Write the note description and padding");
             if (writer(handle, extra_notes[i].description, nhdr.n_descsz)
                   != nhdr.n_descsz) {
               goto done;
@@ -1447,7 +1388,6 @@ DEBUG_PRINT("%s\n", "Write the note description and padding");
 
         /* Align all following segments to multiples of page size            */
         if (note_align) {
-DEBUG_PRINT("%s\n", "Align all following segments to multiples of page size");
           char scratch[note_align];
           memset(scratch, 0, note_align*sizeof(char));
           if (writer(handle, scratch, note_align*sizeof(char)) != note_align*sizeof(char)) {
@@ -1456,22 +1396,18 @@ DEBUG_PRINT("%s\n", "Align all following segments to multiples of page size");
         }
 
         /* Write all memory segments                                         */
-DEBUG_PRINT("%s\n", "Write all memory segments");
         for (i = 0; i < num_mappings; i++) {
           if (mappings[i].write_size > 0) {
             ssize_t written = writer(handle, (void *)mappings[i].start_address,
                      mappings[i].write_size);
-DEBUG_PRINT("segment = %d write_size = %lu, start_address = %p, end_address = %p, flags = 0x%x written = %ld\n", i, mappings[i].write_size, (void *)mappings[i].start_address, (void *)mappings[i].end_address, mappings[i].flags, written);
             if (written != mappings[i].write_size) {
               goto done;
             }
           } else {
-DEBUG_PRINT("segment = %d write_size = %lu, start_address = %p, end_address = %p, flags = 0x%x\n", i, mappings[i].write_size, (void *)mappings[i].start_address, (void *)mappings[i].end_address, mappings[i].flags);
           }
         }
         if (vdso.address) {
           /* Finally write the contents of Phdrs that "belong" to vdso.      */
-DEBUG_PRINT("%s\n", "Finally write the contents of Phdrs that \"belong\" to vdso");
           Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
           for (i = 0; i < vdso.ehdr->e_phnum; i++) {
             Phdr *p = vdso_phdr+i;
@@ -1491,7 +1427,6 @@ DEBUG_PRINT("%s\n", "Finally write the contents of Phdrs that \"belong\" to vdso
   }
 
 done:
-DEBUG_PRINT("done: rc = %d\n", rc);
   if (is_done(handle)) {
     rc = 0;
   }
@@ -1500,7 +1435,6 @@ DEBUG_PRINT("done: rc = %d\n", rc);
     NO_INTR(sys_close(loopback[0]));
   if (loopback[1] >= 0)
     NO_INTR(sys_close(loopback[1]));
-DEBUG_PRINT("return: rc = %d\n", rc);
   return rc;
 }
 
@@ -1640,18 +1574,15 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
                           const struct CoredumperCompressor** compressors) {
   int saved_errno1 = 0;
 
-DEBUG_PRINT("PATH = %s\n", PATH);
   /* Create a pipe for communicating between processes                       */
   if (sys_pipe(fds) < 0)
     return -1;
 
-DEBUG_PRINT("pipe[0] read from = %d, pipe[1] write to = %d\n", fds[0], fds[1]);
   /* Find a suitable compressor program, if necessary                        */
   if (*compressors != NULL && (*compressors)->compressor != NULL) {
     char stack[4096] __attribute__((aligned (16)));
     struct CreateArgs args;
     pid_t comp_pid;
-DEBUG_PRINT("compressor = %s, stack = %p, aligned = %p\n", (*compressors)->compressor, stack, stack + sizeof(stack) - 16);
 
     args.fds         = fds;
     args.openmax     = openmax;
@@ -1664,7 +1595,6 @@ DEBUG_PRINT("compressor = %s, stack = %p, aligned = %p\n", (*compressors)->compr
         NO_INTR(sys_close(fds[0]));
         NO_INTR(sys_close(fds[1]));
         errno = saved_errno;
-DEBUG_PRINT("%s\n", "close pipe return -1");
         return -1;
       }
     } else if (sys_pipe(args.zip_out) < 0) {
@@ -1677,8 +1607,6 @@ DEBUG_PRINT("%s\n", "close pipe return -1");
       }
     }
 
-DEBUG_PRINT("zip_in[0] read from = %d, zip_in[1] write to = %d\n", args.zip_in[0], args.zip_in[1]);
-DEBUG_PRINT("zip_out[0] read from = %d, zip_out[1] write to = %d\n", args.zip_out[0], args.zip_out[1]);
 
     /* We use clone() here, instead of the more common fork(). This ensures
      * that the WriteCoreDump() code path never results in making a COW
@@ -1722,7 +1650,6 @@ DEBUG_PRINT("zip_out[0] read from = %d, zip_out[1] write to = %d\n", args.zip_ou
         NO_INTR(sys_close(args.zip_in[0]));
         NO_INTR(sys_close(args.zip_in[1]));
         errno = saved_errno2;
-DEBUG_PRINT("%s\n", "return -1");
         return -1;
       }
     }
@@ -1752,7 +1679,6 @@ DEBUG_PRINT("%s\n", "return -1");
       }
     }
   }
-DEBUG_PRINT("%s\n", "return 0");
   return 0;
 }
 
@@ -1770,7 +1696,6 @@ DEBUG_PRINT("%s\n", "return 0");
 static inline int GetParentRegs(void *frame, regs *cpu, fpregs *fp,
                                 fpxregs *fpx, int *hasSSE) {
 #ifdef THREADS
-DEBUG_PRINT("%s\n", "THREADS return 1");
   return 1;
 #else
   int rc = 0;
@@ -1921,8 +1846,6 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     memset(scratch, 0xFF, sizeof(scratch));
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
     long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
-DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu, main_thread = %d, pid = %d\n", ptrace_rc, scratch_iovec.iov_len, main_pid, pids[i]);
-DEBUG_PRINT("sizeof Frame = %lu, sizeof arm64_regs = %lu\n", sizeof(Frame), sizeof(arm64_regs));
     if (ptrace_rc == 0) {
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
       // rewriting registers of the main thread breaks core file
@@ -1934,7 +1857,6 @@ DEBUG_PRINT("sizeof Frame = %lu, sizeof arm64_regs = %lu\n", sizeof(Frame), size
       memset(scratch, 0xFF, sizeof(scratch));
       scratch_iovec.iov_len = sizeof(scratch);
       ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec);
-DEBUG_PRINT("PTRACE_GETREGSET(FP) = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
       if (ptrace_rc == 0) {
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
@@ -1949,7 +1871,6 @@ DEBUG_PRINT("PTRACE_GETREGSET(FP) = %d, len = %lu\n", ptrace_rc, scratch_iovec.i
         hasSSE = 0;
         #endif
       } else {
-DEBUG_PRINT("%s\n", "");
         goto ptrace;
       }
     } else {
@@ -2148,7 +2069,6 @@ DEBUG_PRINT("%s\n", "");
       }
     }
 
-DEBUG_PRINT("file_name = %p\n", file_name);
     if (file_name == NULL) {
       /* Create a file descriptor that can be used for reading data from
        * our child process. This is a little complicated because we need
@@ -2308,7 +2228,6 @@ DEBUG_PRINT("file_name = %p\n", file_name);
       struct WriterFds writer_fds;
       ssize_t (*writer)(void *, const void *, size_t);
 
-DEBUG_PRINT("Synchronously write the core to a file = %s\n", file_name);
       /* If compiled without threading support, this is the only
        * place where we can request the parent's CPU
        * registers. This function is a no-op when threading
@@ -2323,12 +2242,10 @@ DEBUG_PRINT("Synchronously write the core to a file = %s\n", file_name);
        * necessary, add a compressor to the pipeline.
        */
       if (compressors != NULL && compressors->compressor != NULL) {
-DEBUG_PRINT("CreatePipeline rc = %d\n", rc);
         if (CreatePipeline(fds, openmax, PATH, &compressors) < 0) {
           goto error;
         }
       }
-DEBUG_PRINT("created rc = %d pipe[0] read from = %d, pipe[1] write to = %d\n", fds[0], fds[1]);
       if (selected_compressor) {
         *selected_compressor = compressors;
       }
@@ -2349,7 +2266,6 @@ DEBUG_PRINT("created rc = %d pipe[0] read from = %d, pipe[1] write to = %d\n", f
           NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
                                                kOpenFlags|O_LARGEFILE,
                                                0600));
-DEBUG_PRINT("open writer_fds.out_fd = %d, filename = %s\n", writer_fds.out_fd, extended_file_name);
           if (writer_fds.out_fd < 0 && EINVAL == errno && O_LARGEFILE) {
             /* This kernel apears not to have large file support.
              * Try again without O_LARGEFILE.
@@ -2357,7 +2273,6 @@ DEBUG_PRINT("open writer_fds.out_fd = %d, filename = %s\n", writer_fds.out_fd, e
             NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
                                                  kOpenFlags,
                                                  0600));
-DEBUG_PRINT("open writer_fds.out_fd = %d, filename = %s\n", writer_fds.out_fd, extended_file_name);
           }
           if (writer_fds.out_fd < 0) {
             saved_errno = errno;
@@ -2394,7 +2309,6 @@ DEBUG_PRINT("open writer_fds.out_fd = %d, filename = %s\n", writer_fds.out_fd, e
                            thread_fpregs, hasSSE ? thread_fpxregs : NULL,
                            pagesize, prioritize ? max_length : 0, main_pid,
                            notes, note_count);
-DEBUG_PRINT("CreateElfCore rc = %d\n", rc);
         if (fds[0] >= 0) {
           saved_errno = errno;
           /* Close the input side of the compression pipeline, and flush
@@ -2402,14 +2316,12 @@ DEBUG_PRINT("CreateElfCore rc = %d\n", rc);
            */
           if (fds[1] >= 0) { NO_INTR(sys_close(fds[1])); fds[1] = -1; }
           if (FlushPipe(&writer_fds) < 0) {
-// DEBUG_PRINT("%s\n", "");
             rc = -1;
           } else {
             errno = saved_errno;
           }
         }
       } else {
-DEBUG_PRINT("%s\n", "set rc = 0");
         rc = 0;
       }
 
@@ -2420,7 +2332,6 @@ DEBUG_PRINT("%s\n", "set rc = 0");
       if (fds[1] >= 0)            NO_INTR(sys_close(fds[1]));
       errno = saved_errno;
 
-DEBUG_PRINT("rc = %d\n", rc);
       if (rc < 0) {
         goto error;
       }
@@ -2434,7 +2345,6 @@ DEBUG_PRINT("rc = %d\n", rc);
   }
 
   ResumeAllProcessThreads(threads, pids);
-DEBUG_PRINT("fd = %d\n", fd);
   return fd;
 
 error:
@@ -2445,7 +2355,6 @@ error:
     errno = saved_errno;
   }
   ResumeAllProcessThreads(threads, pids);
-DEBUG_PRINT("%s\n", "exit -1");
   return -1;
 }
 

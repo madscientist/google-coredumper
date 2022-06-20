@@ -347,7 +347,6 @@ static void ListerThread(struct ListerParams *args) {
      * check there first, and then fall back on the older naming
      * convention if necessary.
      */
-  DEBUG_PRINT("proc_path = %s\n", *proc_path);
     if ((sig_proc = proc = c_open(*proc_path, O_RDONLY|O_DIRECTORY, 0)) < 0) {
       if (*++proc_path != NULL) {
         continue;
@@ -381,7 +380,6 @@ static void ListerThread(struct ListerParams *args) {
         char buf[4096];
         ssize_t nbytes = sys_getdents(proc, (struct kernel_dirent *)buf,
                                       sizeof(buf));
-  DEBUG_PRINT("nbytes = %ld, proc = %d, proc_path = %s\n", nbytes, proc, *proc_path);
         if (nbytes < 0)
           goto failure;
         else if (nbytes == 0) {
@@ -515,7 +513,6 @@ static void ListerThread(struct ListerParams *args) {
         args->result = args->callback(args->parameter, num_threads,
                                       pids, args->ap);
         args->err = errno;
-  DEBUG_PRINT("callback err = %d\n", args->result);
 
         /* Callback should have resumed threads, but better safe than sorry  */
         if (ResumeAllProcessThreads(num_threads, pids)) {
@@ -564,7 +561,6 @@ int ListAllProcessThreads(void *parameter,
   int                    dumpable = 1, sig;
   struct kernel_sigset_t sig_blocked, sig_old;
 
-  DEBUG_PRINT("&arg = %p, altstack = %p\n", &args, &(altstack_mem[MINSIGSTKSZ]));
   va_start(args.ap, callback);
 
   /* If we are short on virtual memory, initializing the alternate stack
@@ -686,7 +682,6 @@ int ListAllProcessThreads(void *parameter,
     }
   }
 
- DEBUG_PRINT("result = %d, err = %d\n", args.result, args.err);
   /* Restore the "dumpable" state of the process                             */
 failed:
   #if defined (__aarch64__)
