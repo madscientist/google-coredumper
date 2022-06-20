@@ -244,8 +244,10 @@ int WriteCompressedCoreDump(const char *file_name, size_t max_length,
                             struct CoredumperCompressor **selected_compressor){
   ucontext_t context, *cp = &context;
   FRAME(frame);
+  #ifdef __aarch64__
   getcontext(cp);
   memcpy((void*)&frame.arm, (void*)&context.uc_mcontext.regs, sizeof(arm64_regs));
+  #endif
   DEBUG_PRINT("tid = %d\n", frame.tid);
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);

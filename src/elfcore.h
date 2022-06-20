@@ -316,10 +316,10 @@ extern "C" {
                           "r"(&f.arm.uregs[30])         \
                         : "memory");                    \
                     } while (0)
-  #define SET_FRAME(f,r)                                              \
-                     do {                                             \
-                       errno         = (f).errno_;                    \
-                       (r)           = (f).arm;                       \
+  #define SET_FRAME(f,r)                                \
+                     do {                               \
+                       errno         = (f).errno_;      \
+                       (r)           = (f).arm;         \
                      } while (0)
 #elif defined(__mips__) && defined(__GNUC__)
   typedef struct Frame {
