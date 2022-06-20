@@ -48,6 +48,9 @@ extern "C" {
 #include <sys/types.h>
 #include "config.h"
 
+#ifdef __aarch64__
+#include <ucontext.h>
+#endif
 
 /* Define the DUMPER symbol to make sure that there is exactly one
  * core dumper built into the library.
@@ -280,41 +283,11 @@ extern "C" {
                     do {                                \
                         f.errno_ = errno;               \
                         f.tid    = sys_gettid();        \
-                        __asm__ volatile(               \
-                            "stp x0, x1, [%0]\n"        \
-                            "stp x2, x3, [%1]\n"        \
-                            "stp x4, x5, [%2]\n"        \
-                            "stp x6, x7, [%3]\n"        \
-                            "stp x8, x9, [%4]\n"        \
-                            "stp x10, x11, [%5]\n"      \
-                            "stp x12, x13, [%6]\n"      \
-                            "stp x14, x15, [%7]\n"      \
-                            "stp x16, x17, [%8]\n"      \
-                            "stp x18, x19, [%9]\n"      \
-                            "stp x20, x21, [%10]\n"     \
-                            "stp x22, x23, [%11]\n"     \
-                            "stp x24, x25, [%12]\n"     \
-                            "stp x26, x27, [%13]\n"     \
-                            "stp x28, x29, [%14]\n"     \
-                            "str x30, [%15]\n"          \
-                        :                               \
-                        : "r"(&f.arm.uregs[0]),         \
-                          "r"(&f.arm.uregs[2]),         \
-                          "r"(&f.arm.uregs[4]),         \
-                          "r"(&f.arm.uregs[6]),         \
-                          "r"(&f.arm.uregs[8]),         \
-                          "r"(&f.arm.uregs[10]),        \
-                          "r"(&f.arm.uregs[12]),        \
-                          "r"(&f.arm.uregs[14]),        \
-                          "r"(&f.arm.uregs[16]),        \
-                          "r"(&f.arm.uregs[18]),        \
-                          "r"(&f.arm.uregs[20]),        \
-                          "r"(&f.arm.uregs[22]),        \
-                          "r"(&f.arm.uregs[24]),        \
-                          "r"(&f.arm.uregs[26]),        \
-                          "r"(&f.arm.uregs[28]),        \
-                          "r"(&f.arm.uregs[30])         \
-                        : "memory");                    \
+                        ucontext_t context;             \
+                        getcontext(&context);           \
+                        memcpy((void*)&f.arm,                          \
+                               (const void*)&context.uc_mcontext.regs, \
+                               sizeof(arm64_regs));                    \
                     } while (0)
   #define SET_FRAME(f,r)                                \
                      do {                               \
