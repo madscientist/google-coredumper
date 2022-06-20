@@ -891,7 +891,7 @@ void TestCoreDump() {
     CheckWithReadElf(input, output, core_test, "", "cat", "");
     CheckWithGDB(input, output, core_test, &dummy, cmp);
 
-    unlink(core_test);
+    // unlink(core_test);
   }
 
   /* Stop our threads                                                        */
