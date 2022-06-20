@@ -147,19 +147,9 @@ extern "C" {
   typedef struct fpxregs {      /* No extended FPU registers on ARM          */
   } fpxregs;
   typedef struct fpregs {       /* FPU registers                             */
-    struct fp_reg {
-      unsigned int sign1:1;
-      unsigned int unused:15;
-      unsigned int sign2:1;
-      unsigned int exponent:14;
-      unsigned int j:1;
-      unsigned int mantissa1:31;
-      unsigned int mantissa0:32;
-    } fpregs[8];
-    unsigned int   fpsr:32;
-    unsigned int   fpcr:32;
-    unsigned char  ftype[8];
-    unsigned int   init_flag;
+    __uint128_t  vregs[32];
+    unsigned int fpsr;
+    unsigned int fpcr;
   } fpregs;
   #define regs arm64_regs         /* General purpose registers                 */
 #elif defined(__mips__)
@@ -668,6 +658,7 @@ static int WriteThreadRegs(void *handle,
   Nhdr nhdr;
   memset(&nhdr, 0, sizeof(Nhdr));
   /* Process status and integer registers                                    */
+  DEBUG_PRINT("Registers: sizeof prstatus = %lu\n", sizeof(struct prstatus));
   nhdr.n_namesz = 5;
   nhdr.n_descsz = sizeof(struct prstatus);
   nhdr.n_type   = NT_PRSTATUS;
