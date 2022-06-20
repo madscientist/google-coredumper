@@ -73,6 +73,8 @@ extern "C" {
     #define O_LARGEFILE 0x2000
   #elif defined(__ARM_ARCH_3__)
     #define O_LARGEFILE 0400000
+  #elif defined(__aarch64__)
+    #define O_LARGEFILE  __O_LARGEFILE
   #elif defined(__PPC__) || defined(__ppc__)
     #define O_LARGEFILE 0200000
   #else
@@ -141,6 +143,15 @@ extern "C" {
     unsigned int   init_flag;
   } fpregs;
   #define regs arm_regs         /* General purpose registers                 */
+#elif defined(__aarch64__)
+  typedef struct fpxregs {      /* No extended FPU registers on ARM          */
+  } fpxregs;
+  typedef struct fpregs {       /* FPU registers                             */
+    __uint128_t  vregs[32];
+    unsigned int fpsr;
+    unsigned int fpcr;
+  } fpregs;
+  #define regs arm64_regs         /* General purpose registers                 */
 #elif defined(__mips__)
   typedef struct fpxregs {      /* No extended FPU registers on MIPS         */
   } fpxregs;
@@ -157,13 +168,15 @@ typedef struct elf_timeval {    /* Time value with microsecond resolution    */
   long tv_usec;                 /* Microseconds                              */
 } elf_timeval;
 
-
+#if !defined(__aarch64__)
 typedef struct elf_siginfo {    /* Information about signal (unused)         */
   int32_t si_signo;             /* Signal number                             */
   int32_t si_code;              /* Extra code                                */
   int32_t si_errno;             /* Errno                                     */
 } elf_siginfo;
-
+#else
+typedef struct elf_siginfo elf_siginfo;
+#endif
 
 typedef struct prstatus {       /* Information about thread; includes CPU reg*/
   elf_siginfo    pr_info;       /* Info associated with signal               */
@@ -232,6 +245,9 @@ typedef struct core_user {      /* Ptrace returns this data for thread state */
 #elif defined(__ARM_ARCH_3__)
   struct fpregs  fpregs;        /* FPU registers                             */
   struct fpregs  *fpregs_ptr;   /* Pointer to FPU registers                  */
+#elif defined(__aarch64__)
+  struct fpregs  fpregs;        /* FPU registers                             */
+  struct fpregs  *fpregs_ptr;   /* Pointer to FPU registers                  */
 #endif
 #endif
 } core_user;
@@ -260,6 +276,8 @@ typedef struct core_user {      /* Ptrace returns this data for thread state */
   #define ELF_ARCH  EM_386
 #elif defined(__ARM_ARCH_3__)
   #define ELF_ARCH  EM_ARM
+#elif defined(__aarch64__)
+  #define ELF_ARCH  EM_AARCH64
 #elif defined(__mips__)
   #define ELF_ARCH  EM_MIPS
 #endif
@@ -923,6 +941,15 @@ static int CreateElfCore(void *handle,
                       }
                     }
 
+                    /* check if the flag is "pf" */
+                    if (ch == 'p') {
+                      ch = GetChar(&io);
+                      if (ch == 'f') {
+                        dontdump = true;
+                        break;
+                      }
+                    }
+
                     /* skip any remaining flag characters */
                     while (ch >= 'a' && ch <= 'z')
                       ch = GetChar(&io);
@@ -1310,8 +1337,8 @@ static int CreateElfCore(void *handle,
         /* Write all memory segments                                         */
         for (i = 0; i < num_mappings; i++) {
           if (mappings[i].write_size > 0 &&
-              writer(handle, (void *)mappings[i].start_address,
-                     mappings[i].write_size) != mappings[i].write_size) {
+            writer(handle, (void *)mappings[i].start_address,
+                   mappings[i].write_size) != mappings[i].write_size) {
             goto done;
           }
         }
@@ -1489,7 +1516,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
 
   /* Find a suitable compressor program, if necessary                        */
   if (*compressors != NULL && (*compressors)->compressor != NULL) {
-    char stack[4096];
+    char stack[4096] __attribute__((aligned (16)));
     struct CreateArgs args;
     pid_t comp_pid;
 
@@ -1693,7 +1720,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 #ifdef THREADS
   for (i = 0; i < threads; i++) {
     char scratch[4096];
-    #ifdef __mips__
+    #if defined(__mips__)
     /* MIPS kernels do not support PTRACE_GETREGS, instead we have to call
      * PTRACE_PEEKUSER go retrieve individual CPU registers. The indices
      * for these registers do not exactly match with the order in the
@@ -1750,6 +1777,28 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       SET_FRAME(*(Frame *)frame, thread_regs[i]);
     }
     hasSSE = 0;
+    #elif defined(__aarch64__)
+    memset(scratch, 0xFF, sizeof(scratch));
+    struct iovec scratch_iovec = { scratch, sizeof(scratch)};
+    if (sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec) == 0) {
+      memcpy(thread_regs + i, scratch, sizeof(struct regs));
+      if (main_pid == pids[i]) {
+        SET_FRAME(*(Frame *)frame, thread_regs[i]);
+      }
+      memset(scratch, 0xFF, sizeof(scratch));
+      scratch_iovec.iov_len = sizeof(scratch);
+      if (sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec) == 0) {
+        memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
+        memset(scratch, 0xFF, sizeof(scratch));
+        hasSSE = 0;
+      } else {
+        goto ptrace;
+      }
+    } else {
+   ptrace: /* Oh, well, undo everything and get out of here                  */
+      ResumeAllProcessThreads(threads, pids);
+      goto error;
+    }
     #else
     memset(scratch, 0xFF, sizeof(scratch));
     if (sys_ptrace(PTRACE_GETREGS, pids[i], scratch, scratch) == 0) {
@@ -1785,10 +1834,12 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   /* Get parent's CPU registers, and user data structure                     */
   {
     #ifndef __mips__
+    #ifndef __aarch64__ // PTRACE_PEEKUSER returns -1 and set errno = 5 (EIO 5 Input/output error)
     for (i = 0; i < sizeof(struct core_user); i += sizeof(int)) {
       sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
                  ((char *)&user) + i);
     }
+    #endif
 
     /* Overwrite the regs from ptrace with the ones previously computed.  */
     memcpy(&user.regs, thread_regs, sizeof(struct regs));
@@ -1806,7 +1857,9 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   prpsinfo.pr_gid   = sys_getegid();
   prpsinfo.pr_pid   = main_pid;
   prpsinfo.pr_ppid  = sys_getppid();
+  #if !defined(__aarch64__)
   prpsinfo.pr_pgrp  = sys_getpgrp();
+  #endif
   prpsinfo.pr_sid   = sys_getsid(0);
   /* scope */ {
     char scratch[4096], *cmd = scratch, *ptr;
@@ -1897,8 +1950,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   }
 
   /* scope */ {
-    int openmax  = sys_sysconf(_SC_OPEN_MAX);
-    int pagesize = sys_sysconf(_SC_PAGESIZE);
+    int openmax  = sysconf(_SC_OPEN_MAX);
+    int pagesize = sysconf(_SC_PAGESIZE);
     struct kernel_sigset_t old_signals, blocked_signals;
 
     const char *file_name =
