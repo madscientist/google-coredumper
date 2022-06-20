@@ -75,6 +75,8 @@ extern "C" {
     #define O_LARGEFILE 0x2000
   #elif defined(__ARM_ARCH_3__)
     #define O_LARGEFILE 0400000
+  #elif defined(__aarch64__)
+    #define O_LARGEFILE  __O_LARGEFILE
   #elif defined(__PPC__) || defined(__ppc__)
     #define O_LARGEFILE 0200000
   #else
