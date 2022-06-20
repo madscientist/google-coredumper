@@ -1836,6 +1836,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   int              pair[2];
   int              main_pid = ((Frame *)frame)->tid;
 
+DEBUG_PRINT("main_pid = %d\n", main_pid);
+
   const struct CoreDumpParameters *params =
       va_arg(ap, const struct CoreDumpParameters *);
 
@@ -1918,31 +1920,18 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     memset(scratch, 0xFF, sizeof(scratch));
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
     long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
-DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
+DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu, main_thread = %d, pid = %d\n", ptrace_rc, scratch_iovec.iov_len, main_pid, pids[i]);
     if (ptrace_rc == 0) {
-      for (size_t i = 0; i < scratch_iovec.iov_len;) {
-          for (int j = 0; i < scratch_iovec.iov_len && j < 64; ++i, ++j) {
-              DPRINT("%02x ", scratch[i]);
-          }
-          DPRINT("%s", "\n");
-      }
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
       } else {
         memcpy(thread_regs + i, scratch, sizeof(struct regs));
       }
-#if 1
       memset(scratch, 0xFF, sizeof(scratch));
       scratch_iovec.iov_len = sizeof(scratch);
       ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec);
 DEBUG_PRINT("PTRACE_GETREGSET(FP) = %d, len = %lu\n", ptrace_rc, scratch_iovec.iov_len);
       if (ptrace_rc == 0) {
-        for (size_t i = 0; i < scratch_iovec.iov_len;) {
-            for (int j = 0; i < scratch_iovec.iov_len && j < 64; ++i, ++j) {
-                DPRINT("%02x ", scratch[i]);
-            }
-            DPRINT("%s", "\n");
-        }
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
         #if defined(__i386__) && !defined( __x86_64__)
@@ -1959,7 +1948,6 @@ DEBUG_PRINT("PTRACE_GETREGSET(FP) = %d, len = %lu\n", ptrace_rc, scratch_iovec.i
 DEBUG_PRINT("%s\n", "");
         goto ptrace;
       }
-#endif
     } else {
    ptrace: /* Oh, well, undo everything and get out of here                  */
       ResumeAllProcessThreads(threads, pids);
@@ -2001,8 +1989,12 @@ DEBUG_PRINT("%s\n", "");
   {
     #ifndef __mips__
     for (i = 0; i < sizeof(struct core_user); i += sizeof(int)) {
-      sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
+// DEBUG_PRINT("(char *)&user) + i = %p, (char *)&user) + i = %x\n", (void*)(((char *)&user) + i), *(((char *)&user) + i));
+      errno = 0;
+      long word = sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
                  ((char *)&user) + i);
+// DEBUG_PRINT("pids[0] = %d, word = %ld, errno = %d\n", pids[0], word, errno);
+// DEBUG_PRINT("(char *)&user) + i = %p, (char *)&user) + i = %x\n", (void*)(((char *)&user) + i), *(((char *)&user) + i));
     }
 
     /* Overwrite the regs from ptrace with the ones previously computed.  */
