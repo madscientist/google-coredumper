@@ -116,15 +116,10 @@ static int local_clone (int (*fn)(void *), void *arg, ...) {
    * is being debugged. This is OK and the error code will be reported
    * correctly.
    */
-  #if defined (__aarch64__)
   uintptr_t child_stack = ((uintptr_t)&arg - 4096);
   child_stack += (16 - child_stack % 16);
   return sys_clone(fn, (void *)child_stack,
                    CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
-  #else
-  return sys_clone(fn, (char *)&arg - 4096,
-                   CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
-  #endif
 }
 
 
