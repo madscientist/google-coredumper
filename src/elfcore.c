@@ -60,8 +60,6 @@ extern "C" {
 #include "linuxthreads.h"
 #include "thread_lister.h"
 
-#include <stdio.h>
-
 #ifndef CLONE_UNTRACED
 #define CLONE_UNTRACED 0x00800000
 #endif
@@ -309,6 +307,7 @@ namespace {
 #define ERRNO my_errno
 #endif
 
+
 /* Re-runs fn until it doesn't cause EINTR
  */
 #define NO_INTR(fn)    do {} while ((fn) < 0 && errno == EINTR)
@@ -479,7 +478,6 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
           fds->max_length = 0;
           break;
         }
-        ssize_t read_rc = rc;
         rc = c_write(fds->out_fd, scratch, rc, &errno);
         if (rc <= 0) {
           return -1;
@@ -649,38 +647,20 @@ static int WriteThreadRegs(void *handle,
   nhdr.n_type   = NT_PRSTATUS;
   prstatus->pr_pid = pid;
   prstatus->pr_reg = *regs;
-
-  ssize_t writer_rc = writer(handle, &nhdr, sizeof(Nhdr));
-  if (writer_rc != sizeof(Nhdr)) {
-    return -1;
-  }
-
-  writer_rc = writer(handle, "CORE\0\0\0\0", 8);
-  if (writer_rc != 8) {
-    return -1;
-  }
-
-  writer_rc = writer(handle, prstatus, sizeof(struct prstatus));
-  if (writer_rc != sizeof(struct prstatus)) {
+  if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
+      writer(handle, "CORE\0\0\0\0", 8) != 8 ||
+      writer(handle, prstatus, sizeof(struct prstatus)) !=
+      sizeof(struct prstatus)) {
     return -1;
   }
 
   /* FPU registers                                                           */
   nhdr.n_descsz = sizeof(struct fpregs);
   nhdr.n_type   = NT_FPREGSET;
-
-  writer_rc = writer(handle, &nhdr, sizeof(Nhdr));
-  if (writer_rc != sizeof(Nhdr)) {
-    return -1;
-  }
-
-  writer_rc = writer(handle, "CORE\0\0\0\0", 8);
-  if (writer_rc != 8) {
-    return -1;
-  }
-
-  writer_rc = writer(handle, fpregs, sizeof(struct fpregs));
-  if (writer_rc != sizeof(struct fpregs)) {
+  if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
+      writer(handle, "CORE\0\0\0\0", 8) != 8 ||
+      writer(handle, fpregs, sizeof(struct fpregs)) !=
+      sizeof(struct fpregs)) {
     return -1;
   }
 
@@ -779,30 +759,6 @@ static Ehdr *SanitizeVDSO(Ehdr *ehdr, size_t start, size_t end) {
   return ehdr;
 }
 
-void dump(const char* file)
-{
-  #if 0
-  int dump_fd;
-  NO_INTR(dump_fd = sys_open(file, O_RDONLY, 0));
-  if (dump_fd >= 0) {
-    ssize_t n = 0;
-    ssize_t total = 0;
-    do {
-        char buf[4096] = "";
-        int dump_errno;
-        n = c_read(dump_fd, buf, sizeof(buf), &dump_errno);
-        if (n > 0) {
-          total += n;
-          buf[n] = '\0';
-          DPRINT("%s", buf);
-        } else {
-        }
-    } while (n > 0);
-    NO_INTR(sys_close(dump_fd));
-  }
-  #endif
-}
-
 /* This function is invoked from a separate process. It has access to a
  * copy-on-write copy of the parents address space, and all crucial
  * information about the parent has been computed by the caller.
@@ -828,9 +784,6 @@ static int CreateElfCore(void *handle,
   if (sys_pipe(loopback) < 0)
     goto done;
 
-  dump("/proc/self/maps");
-  dump("/proc/self/smaps");
-
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
   if (io.fd >= 0) {
@@ -852,7 +805,6 @@ static int CreateElfCore(void *handle,
       struct {
         size_t start_address, end_address, offset, write_size;
         int   flags;
-        char name[100];
       } mappings[num_mappings];
       io.data = io.end = 0;
       NO_INTR(io.fd = sys_open("/proc/self/smaps", O_RDONLY, 0));
@@ -921,16 +873,11 @@ static int CreateElfCore(void *handle,
                       ((ch != '\n' && ch != ' ') || *dev != '\000');
 
           /* Skip until end of line                                          */
-          int name_idx = 0;
           while (ch != '\n') {
             if (ch < 0)
               goto read_error;
             ch = GetChar(&io);
-            if (ch != '\n' && ch != ' ' && name_idx < 100) {
-              mappings[i].name[name_idx++] = ch;
-            }
           }
-          mappings[i].name[name_idx] = '\0';
 
           /*
            * Parse extra information from smaps.
@@ -1117,8 +1064,7 @@ static int CreateElfCore(void *handle,
           ehdr.e_phentsize= sizeof(Phdr);
           ehdr.e_phnum    = num_mappings + num_extra_phdrs + 1;
           ehdr.e_shentsize= sizeof(Shdr);
-          ssize_t written = writer(handle, &ehdr, sizeof(Ehdr));
-          if (written != sizeof(Ehdr)) {
+          if (writer(handle, &ehdr, sizeof(Ehdr)) != sizeof(Ehdr)) {
             goto done;
           }
         }
@@ -1162,8 +1108,7 @@ static int CreateElfCore(void *handle,
           phdr.p_type     = PT_NOTE;
           phdr.p_offset   = offset;
           phdr.p_filesz   = filesz;
-          ssize_t written = writer(handle, &phdr, sizeof(Phdr));
-          if (written != sizeof(Phdr)) {
+          if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
             goto done;
           }
 
@@ -1245,8 +1190,7 @@ static int CreateElfCore(void *handle,
             filesz        = mappings[i].write_size;
             phdr.p_filesz = filesz;
             phdr.p_flags  = mappings[i].flags & PF_MASK;
-            ssize_t written = writer(handle, &phdr, sizeof(Phdr));
-            if (written != sizeof(Phdr)) {
+            if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
               goto done;
             }
           }
@@ -1259,8 +1203,7 @@ static int CreateElfCore(void *handle,
                 filesz        = phdr.p_filesz;
                 phdr.p_offset = offset;
                 phdr.p_paddr  = 0; /* match other core phdrs                 */
-                ssize_t written = writer(handle, &phdr, sizeof(Phdr));
-                if (written != sizeof(Phdr)) {
+                if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
                   goto done;
                 }
               }
@@ -1315,8 +1258,7 @@ static int CreateElfCore(void *handle,
                 NO_INTR(sys_close(fd));
                 goto done;
               }
-              int rc1 = writer(handle, &auxv, sizeof(auxv_t));
-              if (rc1 != sizeof(auxv_t)) {
+              if (writer(handle, &auxv, sizeof(auxv_t)) != sizeof(auxv_t)) {
                 NO_INTR(sys_close(fd));
                 goto done;
               }
@@ -1329,9 +1271,8 @@ static int CreateElfCore(void *handle,
            */
           for (i = num_threads; i-- > 0; ) {
             if (pids[i] == main_pid) {
-              int rc_wtr = WriteThreadRegs(handle, writer, prstatus, pids[i],
-                                  regs+i, fpregs+i, fpxregs+i);
-              if (rc_wtr) {
+              if (WriteThreadRegs(handle, writer, prstatus, pids[i],
+                                  regs+i, fpregs+i, fpxregs+i)) {
                 goto done;
               }
               break;
@@ -1339,9 +1280,8 @@ static int CreateElfCore(void *handle,
           }
           for (i = num_threads; i-- > 0; ) {
             if (pids[i] != main_pid) {
-              int rc_wtr = WriteThreadRegs(handle, writer, prstatus, pids[i],
-                                  regs+i, fpregs+i, fpxregs+i);
-              if (rc_wtr) {
+              if (WriteThreadRegs(handle, writer, prstatus, pids[i],
+                                  regs+i, fpregs+i, fpxregs+i)) {
                 goto done;
               }
             }
@@ -1396,13 +1336,10 @@ static int CreateElfCore(void *handle,
 
         /* Write all memory segments                                         */
         for (i = 0; i < num_mappings; i++) {
-          if (mappings[i].write_size > 0) {
-            ssize_t written = writer(handle, (void *)mappings[i].start_address,
-                     mappings[i].write_size);
-            if (written != mappings[i].write_size) {
-              goto done;
-            }
-          } else {
+          if (mappings[i].write_size > 0 &&
+            writer(handle, (void *)mappings[i].start_address,
+                   mappings[i].write_size) != mappings[i].write_size) {
+            goto done;
           }
         }
         if (vdso.address) {
@@ -1605,7 +1542,6 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
         goto fail0;
       }
     }
-
 
     /* We use clone() here, instead of the more common fork(). This ensures
      * that the WriteCoreDump() code path never results in making a COW
@@ -1844,31 +1780,17 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     #elif defined(__aarch64__)
     memset(scratch, 0xFF, sizeof(scratch));
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
-    long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
-    if (ptrace_rc == 0) {
+    if (sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec) == 0) {
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
-      // rewriting registers of the main thread breaks core file
-      // FRAME macro does not save SP, PC, and PSTATE
-      // use getcontext?
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
       }
       memset(scratch, 0xFF, sizeof(scratch));
       scratch_iovec.iov_len = sizeof(scratch);
-      ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec);
-      if (ptrace_rc == 0) {
+      if (sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_FPREGSET, &scratch_iovec) == 0) {
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
         memset(scratch, 0xFF, sizeof(scratch));
-        #if defined(__i386__) && !defined( __x86_64__)
-        /* Linux on x86-64 stores all FPU registers in the SSE structure     */
-        if (sys_ptrace(PTRACE_GETFPXREGS, pids[i], scratch, scratch) == 0) {
-          memcpy(thread_fpxregs + i, scratch, sizeof(struct fpxregs));
-        } else {
-          hasSSE = 0;
-        }
-        #else
         hasSSE = 0;
-        #endif
       } else {
         goto ptrace;
       }
@@ -1914,8 +1836,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     #ifndef __mips__
     #ifndef __aarch64__ // PTRACE_PEEKUSER returns -1 and set errno = 5 (EIO 5 Input/output error)
     for (i = 0; i < sizeof(struct core_user); i += sizeof(int)) {
-      errno = 0;
-      long word = sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
+      sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
                  ((char *)&user) + i);
     }
     #endif
@@ -2029,20 +1950,14 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   }
 
   /* scope */ {
-    #if defined(__aarch64__)
     int openmax  = sysconf(_SC_OPEN_MAX);
     int pagesize = sysconf(_SC_PAGESIZE);
-    #else
-    int openmax  = sysconf(_SC_OPEN_MAX);
-    int pagesize = sysconf(_SC_PAGESIZE);
-    #endif
     struct kernel_sigset_t old_signals, blocked_signals;
 
     const char *file_name =
       va_arg(ap, const char *);
     size_t max_length =
       GetCoreDumpParameter(params, max_length);
-
     const char *PATH =
       va_arg(ap, const char *);
     const struct CoredumperCompressor *compressors =
@@ -2177,8 +2092,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         NO_INTR(sys_close(pair[1]));
 
         /* Get pipe file handle from child                                   */
-        /* scope */
-        {
+        /* scope */ {
           const struct CoredumperCompressor *buffer[1];
           char cmsg_buf[CMSG_SPACE(sizeof(int))];
           struct kernel_iovec  iov;
@@ -2222,7 +2136,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
        * functions that internally invoke poll() for managing the I/O.
        */
       int fds[2] = { -1, -1 };
-      int saved_errno, rc = 0;
+      int saved_errno, rc;
       const char *suffix = "";
       struct WriterFds writer_fds;
       ssize_t (*writer)(void *, const void *, size_t);

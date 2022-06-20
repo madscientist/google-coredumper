@@ -53,8 +53,6 @@ extern "C" {
 #include "linux_syscall_support.h"
 #include "thread_lister.h"
 
-#include <stdio.h>
-
 #ifndef CLONE_UNTRACED
 #define CLONE_UNTRACED 0x00800000
 #endif
@@ -84,6 +82,7 @@ static char *local_itoa(char *buf, int i) {
     return buf;
   }
 }
+
 
 /* Wrapper around clone() that runs "fn" on the same stack as the
  * caller! Unlike fork(), the cloned thread shares the same address space.
@@ -119,9 +118,7 @@ static int local_clone (int (*fn)(void *), void *arg, ...) {
    */
   #if defined (__aarch64__)
   uintptr_t child_stack = ((uintptr_t)&arg - 4096);
-  const uint align = 16;
-  if (child_stack % align != 0)
-    child_stack += align - child_stack % align;
+  child_stack += (16 - child_stack % 16);
   return sys_clone(fn, (void *)child_stack,
                    CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
   #else
@@ -345,9 +342,8 @@ static void ListerThread(struct ListerParams *args) {
      * convention if necessary.
      */
     if ((sig_proc = proc = c_open(*proc_path, O_RDONLY|O_DIRECTORY, 0)) < 0) {
-      if (*++proc_path != NULL) {
+      if (*++proc_path != NULL)
         continue;
-      }
       goto failure;
     }
     if (sys_fstat(proc, &proc_sb) < 0)
@@ -531,6 +527,7 @@ static void ListerThread(struct ListerParams *args) {
   }
 }
 
+
 /* This function gets the list of all linux threads of the current process
  * passes them to the 'callback' along with the 'parameter' pointer; at the
  * call back call time all the threads are paused via
@@ -576,15 +573,9 @@ int ListAllProcessThreads(void *parameter,
   /* Make this process "dumpable". This is necessary in order to ptrace()
    * after having called setuid().
    */
-  #if defined (__aarch64__)
   dumpable = sys_prctl(PR_GET_DUMPABLE, 0, 0, 0, 0);
   if (!dumpable)
     sys_prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
-  #else
-  dumpable = sys_prctl(PR_GET_DUMPABLE, 0, 0, 0, 0);
-  if (!dumpable)
-    sys_prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
-  #endif
 
   /* Fill in argument block for dumper thread                                */
   args.result       = -1;
@@ -632,16 +623,11 @@ int ListAllProcessThreads(void *parameter,
 #ifndef PR_SET_PTRACER
 # define PR_SET_PTRACER 0x59616d61
 #endif
-    #if defined (__aarch64__)
     sys_prctl(PR_SET_PTRACER, clone_pid, 0, 0, 0);
-    #else
-    sys_prctl(PR_SET_PTRACER, clone_pid, 0, 0, 0);
-    #endif
 
     sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
 
     if (clone_pid >= 0) {
-
       int status, rc;
       #if defined (__aarch64__)
       while ((rc = sys_waitpid(clone_pid, &status, __WALL)) < 0 && ERRNO == EINTR) {
@@ -681,13 +667,8 @@ int ListAllProcessThreads(void *parameter,
 
   /* Restore the "dumpable" state of the process                             */
 failed:
-  #if defined (__aarch64__)
   if (!dumpable)
     sys_prctl(PR_SET_DUMPABLE, dumpable, 0, 0, 0);
-  #else
-  if (!dumpable)
-    sys_prctl(PR_SET_DUMPABLE, dumpable, 0, 0, 0);
-  #endif
 
   va_end(args.ap);
 

@@ -41,8 +41,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <stdio.h>
-
 #include "google/coredumper.h"
 #include "elfcore.h"
 #include "linux_syscall_support.h"
@@ -116,6 +114,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
   return -1;
 }
 #endif
+
 
 /* Internal helper method used by GetCoreDump().
  */

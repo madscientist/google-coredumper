@@ -822,7 +822,6 @@ void TestCoreDump() {
     assert(!strcmp(compressor->suffix, ".gz"));
     CheckWithReadElf(input, output, core_test, compressor->suffix,
                      compressor->compressor, "-d");
-    // exit(0);
     assert(!unlink(core_test_gz));
 
     /* Check wether fallback to uncompressed core files works                */
