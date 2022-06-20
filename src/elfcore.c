@@ -245,6 +245,9 @@ typedef struct core_user {      /* Ptrace returns this data for thread state */
 #elif defined(__ARM_ARCH_3__)
   struct fpregs  fpregs;        /* FPU registers                             */
   struct fpregs  *fpregs_ptr;   /* Pointer to FPU registers                  */
+#elif defined(__aarch64__)
+  struct fpregs  fpregs;        /* FPU registers                             */
+  struct fpregs  *fpregs_ptr;   /* Pointer to FPU registers                  */
 #endif
 #endif
 } core_user;
@@ -1836,8 +1839,6 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   int              pair[2];
   int              main_pid = ((Frame *)frame)->tid;
 
-DEBUG_PRINT("main_pid = %d\n", main_pid);
-
   const struct CoreDumpParameters *params =
       va_arg(ap, const struct CoreDumpParameters *);
 
@@ -1921,11 +1922,14 @@ DEBUG_PRINT("main_pid = %d\n", main_pid);
     struct iovec scratch_iovec = { scratch, sizeof(scratch)};
     long ptrace_rc = sys_ptrace(PTRACE_GETREGSET, pids[i], (void*)NT_PRSTATUS, &scratch_iovec);
 DEBUG_PRINT("PTRACE_GETREGSET = %d, len = %lu, main_thread = %d, pid = %d\n", ptrace_rc, scratch_iovec.iov_len, main_pid, pids[i]);
+DEBUG_PRINT("sizeof Frame = %lu, sizeof arm64_regs = %lu\n", sizeof(Frame), sizeof(arm64_regs));
     if (ptrace_rc == 0) {
+      memcpy(thread_regs + i, scratch, sizeof(struct regs));
+      // rewriting registers of the main thread breaks core file
+      // FRAME macro does not save SP, PC, and PSTATE
+      // use getcontext?
       if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
-      } else {
-        memcpy(thread_regs + i, scratch, sizeof(struct regs));
       }
       memset(scratch, 0xFF, sizeof(scratch));
       scratch_iovec.iov_len = sizeof(scratch);
@@ -1988,14 +1992,13 @@ DEBUG_PRINT("%s\n", "");
   /* Get parent's CPU registers, and user data structure                     */
   {
     #ifndef __mips__
+    #ifndef __aarch64__ // PTRACE_PEEKUSER returns -1 and set errno = 5 (EIO 5 Input/output error)
     for (i = 0; i < sizeof(struct core_user); i += sizeof(int)) {
-// DEBUG_PRINT("(char *)&user) + i = %p, (char *)&user) + i = %x\n", (void*)(((char *)&user) + i), *(((char *)&user) + i));
       errno = 0;
       long word = sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
                  ((char *)&user) + i);
-// DEBUG_PRINT("pids[0] = %d, word = %ld, errno = %d\n", pids[0], word, errno);
-// DEBUG_PRINT("(char *)&user) + i = %p, (char *)&user) + i = %x\n", (void*)(((char *)&user) + i), *(((char *)&user) + i));
     }
+    #endif
 
     /* Overwrite the regs from ptrace with the ones previously computed.  */
     memcpy(&user.regs, thread_regs, sizeof(struct regs));

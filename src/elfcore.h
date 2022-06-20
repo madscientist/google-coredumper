@@ -98,7 +98,7 @@ extern "C" {
   } arm_regs;
 #elif defined(__aarch64__)
   typedef struct arm64_regs {     /* General purpose registers                 */
-    uint64_t    regs[31];
+    uint64_t    uregs[31];
     uint64_t    sp;
     uint64_t    pc;
     uint64_t    pstate;

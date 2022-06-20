@@ -117,7 +117,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
 }
 #endif
 
-// #define ENABLE_DEBUG_PRINT
+#define ENABLE_DEBUG_PRINT
 #include "debug_print.h"
 
 /* Internal helper method used by GetCoreDump().
@@ -238,10 +238,14 @@ int WriteCoreDumpLimitedByPriority(const char *file_name, size_t max_length) {
  * gzip compression, or ".Z" for compress compression. This behavior can
  * be changed by defining custom CoredumperCompressor descriptions.
  */
+#include <ucontext.h>
 int WriteCompressedCoreDump(const char *file_name, size_t max_length,
                             const struct CoredumperCompressor compressors[],
                             struct CoredumperCompressor **selected_compressor){
+  ucontext_t context, *cp = &context;
   FRAME(frame);
+  getcontext(cp);
+  memcpy((void*)&frame.arm, (void*)&context.uc_mcontext.regs, sizeof(arm64_regs));
   DEBUG_PRINT("tid = %d\n", frame.tid);
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);

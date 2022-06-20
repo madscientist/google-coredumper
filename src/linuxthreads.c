@@ -85,7 +85,7 @@ static char *local_itoa(char *buf, int i) {
   }
 }
 
-#define ENABLE_DEBUG_PRINT
+// #define ENABLE_DEBUG_PRINT
 #include "debug_print.h"
 
 /* Wrapper around clone() that runs "fn" on the same stack as the
