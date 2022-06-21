@@ -941,6 +941,7 @@ static int CreateElfCore(void *handle,
                       }
                     }
 
+                    #if defined(__aarch64__)
                     /* check if the flag is "pf" */
                     if (ch == 'p') {
                       ch = GetChar(&io);
@@ -949,6 +950,7 @@ static int CreateElfCore(void *handle,
                         break;
                       }
                     }
+                    #endif
 
                     /* skip any remaining flag characters */
                     while (ch >= 'a' && ch <= 'z')
@@ -1337,8 +1339,8 @@ static int CreateElfCore(void *handle,
         /* Write all memory segments                                         */
         for (i = 0; i < num_mappings; i++) {
           if (mappings[i].write_size > 0 &&
-            writer(handle, (void *)mappings[i].start_address,
-                   mappings[i].write_size) != mappings[i].write_size) {
+              writer(handle, (void *)mappings[i].start_address,
+                     mappings[i].write_size) != mappings[i].write_size) {
             goto done;
           }
         }
