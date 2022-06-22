@@ -624,16 +624,10 @@ int ListAllProcessThreads(void *parameter,
 
     if (clone_pid >= 0) {
       int status, rc;
-      #if defined (__aarch64__)
-      while ((rc = sys_waitpid(clone_pid, &status, __WALL)) < 0 && ERRNO == EINTR) {
-             /* Keep waiting                                                 */
-      }
-      #else
       while ((rc = sys0_waitpid(clone_pid, &status, __WALL)) < 0 &&
              ERRNO == EINTR) {
              /* Keep waiting                                                 */
       }
-      #endif
       if (rc < 0) {
         args.err = ERRNO;
         args.result = -1;
