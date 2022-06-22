@@ -935,7 +935,13 @@ static int CreateElfCore(void *handle,
                     }
 
                     #if defined(__aarch64__)
-                    /* check if the flag is "pf" */
+                    /* check if the flag is "pf" (pure PFN range).
+                     * [vvar] is the only region that is marked as "pf" on arm64
+                     * x86_64: [vvar] region is marked as "pf" and "dd" (don't dump)
+                     * arm64:  [vvar] region is marked as "pf"
+                     * Reading data from [vvar] on arm64 fails with errno 14 (EFAULT)
+                     * Consider "pf" as a "don't dump" flag on arm64, similar of x86_64
+                     */
                     if (ch == 'p') {
                       ch = GetChar(&io);
                       if (ch == 'f') {
@@ -1847,7 +1853,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   prpsinfo.pr_gid   = sys_getegid();
   prpsinfo.pr_pid   = main_pid;
   prpsinfo.pr_ppid  = sys_getppid();
-  prpsinfo.pr_pgrp  = getpgrp();
+  prpsinfo.pr_pgrp  = getpgrp();    // syscall sys_getpgrp() is obsolete on arm64-linux.
+                                    // replaced it with getpgrp() that works on X86_64 and arm64-linux.
   prpsinfo.pr_sid   = sys_getsid(0);
   /* scope */ {
     char scratch[4096], *cmd = scratch, *ptr;
@@ -1938,8 +1945,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   }
 
   /* scope */ {
-    int openmax  = sysconf(_SC_OPEN_MAX);
-    int pagesize = sysconf(_SC_PAGESIZE);
+    int openmax  = sysconf(_SC_OPEN_MAX);   // sys_sysconf() is not supported by the kernel
+    int pagesize = sysconf(_SC_PAGESIZE);   // and it is removed from the latest linux_syscall_support.h
     struct kernel_sigset_t old_signals, blocked_signals;
 
     const char *file_name =

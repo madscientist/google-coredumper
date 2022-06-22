@@ -57,9 +57,7 @@ extern "C" {
 #define CLONE_UNTRACED 0x00800000
 #endif
 
-#if defined (__aarch64__)
 const size_t kSigsetSize = sizeof(struct kernel_sigset_t);
-#endif
 
 /* Synchronous signals that should not be blocked while in the lister thread.
  */
@@ -321,11 +319,7 @@ static void ListerThread(struct ListerParams *args) {
     sa.sa_sigaction_ = SignalHandler;
     sys_sigfillset(&sa.sa_mask);
     sa.sa_flags      = SA_ONSTACK|SA_SIGINFO|SA_RESETHAND;
-    #if defined (__aarch64__)
     sys_rt_sigaction(sync_signals[sig], &sa, (struct kernel_sigaction *)NULL, kSigsetSize);
-    #else
-    sys_sigaction(sync_signals[sig], &sa, (struct kernel_sigaction *)NULL);
-    #endif
   }
 
   /* Read process directories in /proc/...                                   */
