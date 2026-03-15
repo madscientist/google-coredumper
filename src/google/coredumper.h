@@ -203,7 +203,9 @@ int WriteCompressedCoreDump(const char *file_name, size_t max_length,
 /* Checks if the current version of the coredumper has a specific parameter.
  */
 #define CoreDumpParametersHas(p, f)                                           \
-  ((p)->size >= offsetof(struct CoreDumpParameters, f) + sizeof((p)->f))
+  ((p)->size >= offsetof(struct CoreDumpParameters, f) + sizeof((p)->f))      \
+  /* NOLINT(bugprone-sizeof-expression) */
+
 
 /* Sets a coredumper parameter to a given value. This will abort the program if
  * the given parameter doesn't exist in the parameters.

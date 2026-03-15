@@ -601,7 +601,12 @@ int ListAllProcessThreads(void *parameter,
       #define SYS_INLINE       inline
       #define SYS_PREFIX       0
       #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      #if defined(_CLANGD)
+      #define sys0_sigprocmask sigprocmask
+      #define sys0_waitpid     waitpid
+      #else
       #include "linux_syscall_support.h"
+      #endif
     #endif
 
     int clone_errno;

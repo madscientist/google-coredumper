@@ -31,17 +31,19 @@
  * Author: Markus Gutschke
  */
 
+/* Include other thread listers here that define THREADS macro
+ * only when they can provide a good implementation.
+ */
+#include "linuxthreads.h"
+
+#ifndef THREADS
+
 #include <stdio.h>         /* needed for NULL on some powerpc platforms (?!) */
 #include <sys/prctl.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "thread_lister.h"
-#include "linuxthreads.h"
-/* Include other thread listers here that define THREADS macro
- * only when they can provide a good implementation.
- */
 
-#ifndef THREADS
+#include "thread_lister.h"
 
 /* Default trivial thread lister for single-threaded applications,
  * or if the multi-threading code has not been ported, yet.

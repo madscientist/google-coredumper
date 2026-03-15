@@ -321,7 +321,13 @@ static ssize_t c_read(int f, void *buf, size_t bytes, int *errno_) {
       #define SYS_INLINE inline
       #define SYS_PREFIX 0
       #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      /* This requires GCC support. It won't work with clang but allow
+         clangd to parse the file. */
+      #if defined(_CLANGD)
+      #define sys0_read read
+      #else
       #include "linux_syscall_support.h"
+      #endif
     #endif
 
     if (bytes > 0) {
@@ -354,7 +360,13 @@ static ssize_t c_write(int f, const void *void_buf, size_t bytes, int *errno_){
       #define SYS_INLINE inline
       #undef  SYS_LINUX_SYSCALL_SUPPORT_H
       #define SYS_PREFIX 0
+      /* This requires GCC support. It won't work with clang but allow
+         clangd to parse the file. */
+      #if defined(_CLANGD)
+      #define sys0_write write
+      #else
       #include "linux_syscall_support.h"
+      #endif
     #endif
 
     const unsigned char *buf = (const unsigned char*)void_buf;
@@ -1407,8 +1419,8 @@ static int CreatePipelineChild(void *void_arg) {
       #define sys0_dup    sys.dup
       #define sys0_dup2   sys.dup2
       #define sys0_execve sys.execve
-      #define sys0_open   sys.open
       #define sys0_fcntl  sys.fcntl
+      #define sys0_open   sys.open
       SysCalls sys;
     #else
       int my_errno;
@@ -1416,7 +1428,18 @@ static int CreatePipelineChild(void *void_arg) {
       #define SYS_INLINE  inline
       #define SYS_PREFIX  0
       #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      /* This requires GCC support. It won't work with clang but allow
+         clangd to parse the file. */
+      #if defined(_CLANGD)
+      #define sys0_close  close
+      #define sys0_dup    dup
+      #define sys0_dup2   dup2
+      #define sys0_fcntl  fcntl
+      #define sys0_open   open
+      extern int sys0_execve(const char* f, const char* const *a, const char* const *e);
+      #else
       #include "linux_syscall_support.h"
+      #endif
     #endif
 
     struct CreateArgs *args = (struct CreateArgs *)void_arg;
@@ -2038,7 +2061,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
             memset(&iov, 0, sizeof(iov));
             memset(&msg, 0, sizeof(msg));
             iov.iov_base            = (void *)&compressors;
-            iov.iov_len             = sizeof(compressors);
+            iov.iov_len             = sizeof(void*);
             msg.msg_iov             = &iov;
             msg.msg_iovlen          = 1;
             msg.msg_control         = &cmsg_buf;

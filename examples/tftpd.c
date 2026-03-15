@@ -123,7 +123,10 @@ static void *tftp_thread(void *arg) {
       len >= sizeof(struct sockaddr_in)) {
     DBG("Responding to %s:%d\n",inet_ntoa(addr.sin_addr),ntohs(addr.sin_port));
     addr.sin_port = 0;
-    bind(fd, (struct sockaddr *)&addr, len);
+    if (bind(fd, (struct sockaddr *)&addr, len) == -1) {
+      perror("bind");
+      exit(1);
+    }
   }
 
   /* Get file name and transfer mode from the incoming TFTP packet.          */
@@ -208,17 +211,17 @@ static void *tftp_thread(void *arg) {
         char *path = dirs[0];
         strcat(strcat(strcpy(malloc(strlen(path) + strlen(raw_file_name) + 2),
                              path), "/"), raw_file_name);
-        
+
       } else {
         file_name = strdup(raw_file_name);
       }
-      
+
       /* Check file attributes.                                              */
       memset(&sb, 0, sizeof(sb));
       if (*file_name == '/') {
         int  ok = 0;
         char **ptr;
-        
+
         /* Search for file in all source directories (normally just
          * "/tftpboot")
          */
@@ -242,7 +245,7 @@ static void *tftp_thread(void *arg) {
         }
       } else {
         char **ptr, *absolute_file_name = NULL;
-        
+
         /* Search for file in all source directories (normally just
          * "/tftpboot")
          */
@@ -260,7 +263,7 @@ static void *tftp_thread(void *arg) {
         free(file_name);
         file_name = absolute_file_name;
       }
-      
+
       /* Check whether the necessary support for reading/writing is compiled
        * into this server, and whether the file is world-readable/writable.
        */
@@ -552,7 +555,7 @@ int main(int argc, char *argv[]) {
       continue;
 
     /* If request was truncated, report error back to client.                */
-    if (count < sizeof(tftp)) {
+    if (count < sizeof(*tftp)) {
       char *ptr;
       msg = "Truncated request";
     send_error:
@@ -564,7 +567,7 @@ int main(int argc, char *argv[]) {
       sendto(server_fd, tftp, ptr-buf, 0, (struct sockaddr *)&addr, len);
       continue;
     }
-    
+
     /* Determine whether this was a read or write request.                   */
     type = ntohs(tftp->th_opcode);
     if (type != RRQ && type != WRQ) {
