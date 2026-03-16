@@ -68,6 +68,10 @@ extern "C" {
 #define AT_SYSINFO_EHDR 33
 #endif
 
+#ifndef NT_FILE
+#define NT_FILE 0x46494c45
+#endif
+
 #ifndef O_LARGEFILE
   #if defined(__mips__)
     #define O_LARGEFILE 0x2000
@@ -802,12 +806,18 @@ static int CreateElfCore(void *handle,
     NO_INTR(sys_close(io.fd));
 
     CountAUXV(&num_auxv, &vdso.address);
+
     /* Read all mappings from "/proc/self/smaps"                             */
+
     /* scope */ {
       static const int PF_MASK      = 0x00000007;
       struct mapping {
         size_t   start_address, end_address, offset, write_size;
-        uint32_t flags;
+        uint16_t flags;
+        bool     is_anon;
+        uint32_t name_len;        /* length of filename; 0 means anonymous */
+        #define  FNAME_MAX 256
+        char     name[FNAME_MAX]; /* NUL-terminated */
       } mappings[num_mappings];
       const struct mapping *endmap = &mappings[num_mappings];
       io.data = io.end = 0;
@@ -815,6 +825,8 @@ static int CreateElfCore(void *handle,
       if (io.fd >= 0) {
         size_t note_align;
         size_t num_extra_phdrs = 0;
+        size_t nt_file_count;
+        size_t nt_file_desc_len;
 
         if ((ch = GetChar(&io)) < 0)
           goto read_error;
@@ -827,9 +839,7 @@ static int CreateElfCore(void *handle,
          * of the header line of the next definition.
          */
         for (struct mapping *mapp = mappings; mapp < endmap;) {
-          static const char * const dev_zero = "/dev/zero";
-          const char *dev = dev_zero;
-          int is_device, is_anonymous;
+          int is_device;
           bool dontdump = false;
           int has_anonymous_pages = 0;
 
@@ -847,7 +857,7 @@ static int CreateElfCore(void *handle,
             mapp->flags = (mapp->flags << 1) | (ch != '-');
           }
 
-          /* Read offset                                                     */
+          /* Read the offset                                                 */
           if ((ch = GetHex(&io, &mapp->offset)) != ' ')
             goto read_error;
 
@@ -864,27 +874,44 @@ static int CreateElfCore(void *handle,
             while (ch == ' ') {
               ch = GetChar(&io);
             }
-            if (ch < 0)
-              goto read_error;
           }
 
-          /* Check whether this is a mapping for an anonymous segment        */
-          is_anonymous = (ch == '\n' || ch == '[');
-          /* Check whether this is a mapping for a non-/dev/zero device      */
-          while (*dev && ch == *dev) {
-            ch = GetChar(&io);
-            dev++;
+          /* Remember the filename.  We must truncate long filenames since we
+           * can't allocate memory, but hopefully there aren't any file paths
+           * longer than FNAME_MAX chars.  A more general, but complex, option
+           * would be to remember the offset into the smap file and use lseek
+           * below when we want to copy the name into the NT_FILE section.
+           */
+          /* scope */ {
+            char *const sp = mapp->name;
+            char *const ep = sp + FNAME_MAX - 1; /* Leave room for NUL */
+            char *cp = sp;
+            while (ch != '\n') {
+              if (ch < 0)
+                goto read_error;
+              if (cp < ep)
+                *(cp++) = (char)ch;
+              ch = GetChar(&io);
+            }
+            /* cp points past the last char.  Trim trailing spaces           */
+            while (cp > sp && cp[-1] == ' ')
+              --cp;
+            *cp = '\0';
+            mapp->name_len = cp - sp;
           }
-          is_device = dev >= dev_zero + 5 &&
-                      ((ch != '\n' && ch != ' ') || *dev != '\000');
 
-          /* Skip until end of line                                          */
-          while (ch != '\n') {
-            if (ch < 0)
-              goto read_error;
-            ch = GetChar(&io);
-          }
+          /* Detect whether this is an anonymous mapping.                    */
+          mapp->is_anon = !mapp->name_len || mapp->name[0] == '[';
 
+          /* Detect a device mapping; don't consider /dev/zero a device.     */
+          #define DEV_PATH "/dev/"
+          #define DEV_ZERO "zero"
+          #define DEV_PLEN sizeof(DEV_PATH) - 1
+          #define DEV_ZLEN sizeof(DEV_ZERO) - 1
+          is_device = (mapp->name_len >= DEV_PLEN
+                       && memcmp(mapp->name, DEV_PATH, DEV_PLEN) == 0
+                       && (mapp->name_len != DEV_PLEN + DEV_ZLEN
+                           || memcmp(mapp->name + DEV_PLEN, DEV_ZERO, DEV_ZLEN) != 0));
 
           /* Parse extra information from one memory segment in smaps.
            * Each time through this loop we read one full line.
@@ -1029,10 +1056,9 @@ static int CreateElfCore(void *handle,
            * library inside it.
            */
 
-          if (is_anonymous || has_anonymous_pages || (mapp->flags & PF_W) != 0) {
+          if (mapp->is_anon || has_anonymous_pages || (mapp->flags & PF_W) != 0) {
             mapp->write_size = mapp->end_address - mapp->start_address;
-          } else if (!is_anonymous
-                     && mapp->offset == 0 && mapp->flags & PF_R
+          } else if (!mapp->is_anon && mapp->offset == 0 && mapp->flags & PF_R
                      && ((char*)mapp->start_address)[0] == ELFMAG0
                      && ((char*)mapp->start_address)[1] == ELFMAG1
                      && ((char*)mapp->start_address)[2] == ELFMAG2
@@ -1105,6 +1131,20 @@ static int CreateElfCore(void *handle,
           }
         }
 
+        /* Compute the size needed for the NT_FILE note:
+         * 3 longs for each entry plus space for filenames
+         * We don't include the note header here: see below
+         */
+        nt_file_desc_len = 0;
+        nt_file_count = 0;
+        for (const struct mapping *mapp = mappings; mapp < endmap; ++mapp) {
+          if (!mapp->is_anon) {
+            /* Add non-anonymous mappings to the NT_FILE note.               */
+            ++nt_file_count;
+            nt_file_desc_len += 3 * sizeof(long) + mapp->name_len + 1;
+          }
+        }
+
         /* Write program headers, starting with the PT_NOTE entry            */
         /* scope */ {
           Phdr   phdr;
@@ -1138,6 +1178,13 @@ static int CreateElfCore(void *handle,
           /* Space for auxv note                                             */
           if (num_auxv) {
             filesz += 8 + sizeof(Nhdr) + num_auxv*sizeof(auxv_t);
+          }
+          /* Space for NT_FILE note, including count and pagesize            */
+          if (nt_file_count > 0) {
+            filesz += sizeof(Nhdr) + 8 + 2 * sizeof(long) + nt_file_desc_len;
+            if (nt_file_desc_len % 4 != 0) {
+              filesz += 4 - nt_file_desc_len % 4;
+            }
           }
 
           memset(&phdr, 0, sizeof(Phdr));
@@ -1355,6 +1402,50 @@ static int CreateElfCore(void *handle,
             if (writer(handle, scratch, description_align) !=
                 description_align) {
               goto done;
+            }
+          }
+
+          /* Write the NT_FILE note, mapping file-backed memory to files     */
+          if (nt_file_count > 0) {
+            long header[2];
+            header[0] = (long)nt_file_count;
+            header[1] = (long)pagesize;
+            nhdr.n_namesz = 5;
+            nhdr.n_descsz = (uint32_t)(nt_file_desc_len + sizeof(header));
+            nhdr.n_type   = NT_FILE;
+            if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr)
+                || writer(handle, "CORE\0\0\0\0", 8) != 8
+                || writer(handle, header, sizeof(header)) != sizeof(header)) {
+              goto done;
+            }
+            /* Write start/end/file_offset (in pages) for each entry         */
+            for (const struct mapping *mapp = mappings; mapp < endmap; ++mapp) {
+              if (!mapp->is_anon) {
+                long triple[3];
+                triple[0] = (long)mapp->start_address;
+                triple[1] = (long)mapp->end_address;
+                triple[2] = (long)(mapp->offset / pagesize);
+                if (writer(handle, triple, sizeof(triple)) != sizeof(triple)) {
+                  goto done;
+                }
+              }
+            }
+            /* Write NUL-terminated filenames                                */
+            for (const struct mapping *mapp = mappings; mapp < endmap; ++mapp) {
+              if (!mapp->is_anon) {
+                const size_t len = mapp->name_len + 1;
+                if (writer(handle, mapp->name, len) != len) {
+                  goto done;
+                }
+              }
+            }
+            /* Pad description to 4-byte boundary                            */
+            if (nt_file_desc_len % 4 != 0) {
+              const char zero_pad[3] = {0, 0, 0};
+              size_t pad = 4 - nt_file_desc_len % 4;
+              if (writer(handle, zero_pad, pad) != pad) {
+                goto done;
+              }
             }
           }
         }

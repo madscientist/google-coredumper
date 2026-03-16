@@ -119,7 +119,7 @@ static struct CoredumperNote extra_notes[] = {
     {"LARGE", 0x1234, sizeof(large_extra_note),
       (const void *)(large_extra_note)}
   };
-static const int kExtraNotesCount = 4;
+static const int kExtraNotesCount = sizeof(extra_notes) / sizeof(extra_notes[0]);
 
 static const char* getEnvVar(const char *varname, const char *defval)
 {
@@ -189,6 +189,7 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
       "NT_PRSTATUS", "NT_FPREGSET",
       "NT_PRSTATUS", "NT_FPREGSET",
 #endif
+      "NT_FILE",
       "DONE", 0 };
   const char  **ptr;
   char buffer[4096];
@@ -383,9 +384,8 @@ static void CheckExtraNotesWithReadElf(FILE *input, FILE *output,
         while (!isspace(*line) && *line != '\0') {
           line++;
         }
-        *line = '\0';
-        line++;
-        int name_size = strlen(name) + 1;
+        *(line++) = '\0';
+        ptrdiff_t name_size = line - name;
 
         line = SkipLeadingWhiteSpace(line);
         int description_size = hextosizet(line, &line);
@@ -401,30 +401,34 @@ static void CheckExtraNotesWithReadElf(FILE *input, FILE *output,
           note_size += 4 - description_size % 4;
         }
 
-        ASSERT(note_index < kExtraNotesCount, "index=%d", note_index);
-        struct CoredumperNote *note = &extra_notes[note_index];
-        if (!strcmp(name, note->name)) {
-          ASSERT(description_size == note->description_size,
-                 "name=%s desc=%d note=%u",
-                 name, description_size, note->description_size);
-          line = SkipLeadingWhiteSpace(line);
-          /* Expect readelf to not recognize our note types.                 */
-          ASSERT(!strncmp(line, "Unknown note type: (", 20),
-                 "name=%s line=%s", name, line);
-          line += 20;
+        if (note_index < kExtraNotesCount) {
+          struct CoredumperNote *note = &extra_notes[note_index];
+          if (!strcmp(name, note->name)) {
+            ASSERT(description_size == note->description_size,
+                   "name=%s desc=%d note=%u",
+                   name, description_size, note->description_size);
+            line = SkipLeadingWhiteSpace(line);
+            /* Expect readelf to not recognize our note types.               */
+            ASSERT(!strncmp(line, "Unknown note type: (", 20),
+                   "name=%s line=%s", name, line);
+            line += 20;
 
-          unsigned int type = hextosizet(line, &line);
-          ASSERT(type == note->type,
-                 "name=%s type=%u note=%u", name, type, note->type);
+            unsigned int type = hextosizet(line, &line);
+            ASSERT(type == note->type,
+                   "name=%s type=%u note=%u", name, type, note->type);
 
-          note_sizes[note_index] = note_size;
-          note_sizes_to_description[note_index] = note_size_to_description;
-          note_index++;
-        } else if (note_index == 0) {
-          /* The custom notes must follow the core notes.                    */
-          ASSERT(!strcmp(name, "CORE") || !strcmp(name, "LINUX"),
-                 "name=%s", name);
-          offset += note_size;
+            note_sizes[note_index] = note_size;
+            note_sizes_to_description[note_index] = note_size_to_description;
+            note_index++;
+          } else if (note_index == 0) {
+            /* The custom notes must follow the core notes.                  */
+            ASSERT(!strcmp(name, "CORE") || !strcmp(name, "LINUX"),
+                   "name=%s", name);
+            offset += note_size;
+          }
+        } else if (strcmp(name, "CORE") == 0) {
+            /* If we find another CORE it must be NT_FILE */
+            ASSERT(strstr(line, "NT_FILE"), "Bad CORE entry: %s", line);
         }
       }
     }
