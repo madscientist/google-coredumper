@@ -460,7 +460,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
     if (nfds > 0 && (pfd[0].revents & POLLIN)) {
       /* Some compressed data has become available. Copy to output file.     */
       char scratch[4096];
-      for (;;) {
+      while (1) {
         size_t l = sizeof(scratch);
         if (l > fds->max_length) {
           l = fds->max_length;
@@ -719,7 +719,6 @@ static void CountAUXV(size_t *pnum_auxv, size_t *pvdso_ehdr) {
  */
 static Ehdr *SanitizeVDSO(Ehdr *ehdr, size_t start, size_t end) {
   const size_t ehdr_address = (size_t)ehdr; /* ehdr alias to avoid casts     */
-  int i;
   Phdr *phdr;
   if (!ehdr_address || (ehdr_address & (sizeof(size_t) - 1))) {
     /* Not properly aligned. Something goofy is going on.                    */
@@ -745,7 +744,7 @@ static Ehdr *SanitizeVDSO(Ehdr *ehdr, size_t start, size_t end) {
     /* Something goofy.                                                      */
     return NULL;
   }
-  for (i = 1; i < ehdr->e_phnum; i++) {
+  for (uint16_t i = 1; i < ehdr->e_phnum; i++) {
     if (phdr[i].p_type == PT_LOAD) {
       /* Only a single PT_LOAD at index 0 is expected                        */
       return NULL;
@@ -791,7 +790,7 @@ static int CreateElfCore(void *handle,
   io.data = io.end = 0;
   NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
   if (io.fd >= 0) {
-    int i, ch;
+    int ch;
     while ((ch = GetChar(&io)) >= 0) {
       num_mappings += (ch == '\n');
     }
@@ -803,55 +802,57 @@ static int CreateElfCore(void *handle,
     NO_INTR(sys_close(io.fd));
 
     CountAUXV(&num_auxv, &vdso.address);
-    /* Read all mappings. This requires re-opening "/proc/self/maps"         */
+    /* Read all mappings from "/proc/self/smaps"                             */
     /* scope */ {
       static const int PF_MASK      = 0x00000007;
-      struct {
-        size_t start_address, end_address, offset, write_size;
-        int   flags;
+      struct mapping {
+        size_t   start_address, end_address, offset, write_size;
+        uint32_t flags;
       } mappings[num_mappings];
+      const struct mapping *endmap = &mappings[num_mappings];
       io.data = io.end = 0;
       NO_INTR(io.fd = sys_open("/proc/self/smaps", O_RDONLY, 0));
       if (io.fd >= 0) {
         size_t note_align;
         size_t num_extra_phdrs = 0;
 
-        if ((ch = GetChar(&io)) < 0) {
+        if ((ch = GetChar(&io)) < 0)
           goto read_error;
-        }
 
-        /* Parse entries of the form:
-         * "^[0-9A-F]*-[0-9A-F]* [r-][w-][x-][p-] [0-9A-F]*.*$"
-         * At the start of each iteration, ch contains the first character.
+        /* Each time through the loop we parse one full segment definition.
+         * The definition starts with a header line of the form:
+         *  ^[0-9A-F]*-[0-9A-F]* [r-][w-][x-][p-] [0-9A-F]* [^ ]* [^ ]* *.*$
+         * followed by size and flag lines up to the next definition.
+         * At the start of each iteration, ch contains the first character
+         * of the header line of the next definition.
          */
-        for (i = 0; i < num_mappings;) {
+        for (struct mapping *mapp = mappings; mapp < endmap;) {
           static const char * const dev_zero = "/dev/zero";
           const char *dev = dev_zero;
-          int j, is_device, is_anonymous;
-          int dontdump = 0;
+          int is_device, is_anonymous;
+          bool dontdump = false;
           int has_anonymous_pages = 0;
-          size_t zeros;
 
-          memset(&mappings[i], 0, sizeof(mappings[i]));
+          memset(mapp, 0, sizeof(*mapp));
 
           /* Read start and end addresses                                    */
-          if (GetHexWithInitChar(&io, &mappings[i].start_address, ch) != '-' ||
-              GetHex(&io, &mappings[i].end_address)   != ' ')
+          if (GetHexWithInitChar(&io, &mapp->start_address, ch) != '-' ||
+              GetHex(&io, &mapp->end_address) != ' ')
             goto read_error;
 
           /* Read flags                                                      */
           while ((ch = GetChar(&io)) != ' ') {
             if (ch < 0)
               goto read_error;
-            mappings[i].flags = (mappings[i].flags << 1) | (ch != '-');
+            mapp->flags = (mapp->flags << 1) | (ch != '-');
           }
 
           /* Read offset                                                     */
-          if ((ch = GetHex(&io, &mappings[i].offset)) != ' ')
+          if ((ch = GetHex(&io, &mapp->offset)) != ' ')
             goto read_error;
 
-          /* Skip over device numbers, and inode number                      */
-          for (j = 0; j < 2; j++) {
+          /* Skip over device numbers, inode number, and trailing spaces     */
+          for (int j = 0; j < 2; j++) {
             while (ch == ' ') {
               ch = GetChar(&io);
             }
@@ -867,8 +868,9 @@ static int CreateElfCore(void *handle,
               goto read_error;
           }
 
-          /* Check whether this is a mapping for a device                    */
+          /* Check whether this is a mapping for an anonymous segment        */
           is_anonymous = (ch == '\n' || ch == '[');
+          /* Check whether this is a mapping for a non-/dev/zero device      */
           while (*dev && ch == *dev) {
             ch = GetChar(&io);
             dev++;
@@ -883,8 +885,8 @@ static int CreateElfCore(void *handle,
             ch = GetChar(&io);
           }
 
-          /*
-           * Parse extra information from smaps.
+
+          /* Parse extra information from one memory segment in smaps.
            * Each time through this loop we read one full line.
            * Stop when we've parsed one memory segment's complete description.
            * Afterwards ch will contain the first character of the next
@@ -895,6 +897,11 @@ static int CreateElfCore(void *handle,
             if (ch < 1 || (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'))
               /* EOF, or new memory segment description start */
               break;
+
+            if (is_device || dontdump) {
+              /* We're not going to keep this segment anyway */
+              continue;
+            }
 
             switch (ch) {
               /* Anonymous: */
@@ -986,69 +993,73 @@ static int CreateElfCore(void *handle,
           /* Drop the private/shared bit. This makes the flags compatible with
            * the ELF access bits
            */
-          mappings[i].flags = (mappings[i].flags >> 1) & PF_MASK;
+          mapp->flags = (mapp->flags >> 1) & PF_MASK;
+
+          if (is_device || dontdump || (mapp->flags & PF_R) == 0) {
+              /* Don't keep this this memory segment because one of:
+               * - It's a device mapping (other than /dev/zero)
+               * - It's marked dontdump
+               * - It's not readable (e.g., stack guard pages)
+               */
+              --endmap;
+              continue;
+          }
 
           /* Skip leading zeroed pages (as found in the stack segment)       */
-          if ((mappings[i].flags & PF_R) && !is_device) {
-            zeros = LeadingZeros(loopback, (void *)mappings[i].start_address,
-                         mappings[i].end_address - mappings[i].start_address,
-                         pagesize);
-            mappings[i].start_address += zeros;
+          mapp->start_address += LeadingZeros(loopback,
+                                              (void *)mapp->start_address,
+                                              mapp->end_address - mapp->start_address,
+                                              pagesize);
+
+          if (mapp->end_address == mapp->start_address) {
+              /* Don't keep zero-sized segments (e.g., unused memory) */
+              --endmap;
+              continue;
           }
 
-          /* Write segment content if the don't dump flag is not set, and one
-           * or more of the following is true:
+          /* Compute segment content size if one or more of the following:
            *  - the segment is anonymous
-           *  - the segment is writable
            *  - the segment has anonymous pages
-           *  - the segment is file backed (ie not anonymous), readable, is at the
-           *    beginning of the file (ie offset = 0) and starts by the magic ELFMAG
-           *    string --> dump only the very first page of the mapping, hoping that
-           *    there will be an ELF PHDR of the loaded executable/library inside it.
+           *  - the segment is writable
+           *
+           * If the segment is file-backed (ie not anonymous), is at the
+           * beginning of the file (ie offset = 0), and starts with the magic
+           * ELFMAG string, then dump only the first page of the mapping,
+           * hoping that there will be an ELF PHDR of the loaded executable or
+           * library inside it.
            */
 
-          if (!dontdump) {
-              if (is_anonymous || has_anonymous_pages || (mappings[i].flags & PF_W) != 0) {
-                mappings[i].write_size = mappings[i].end_address
-                                       - mappings[i].start_address;
-              } else if (!is_anonymous && mappings[i].offset == 0 && mappings[i].flags & PF_R
-                      // Avoid using memcmp here since we are very low level, do the comparison
-                      // manually.
-                      && ((char*)mappings[i].start_address)[0] == ELFMAG0
-                      && ((char*)mappings[i].start_address)[1] == ELFMAG1
-                      && ((char*)mappings[i].start_address)[2] == ELFMAG2
-                      && ((char*)mappings[i].start_address)[3] == ELFMAG3) {
-                mappings[i].write_size = pagesize;
-              }
+          if (is_anonymous || has_anonymous_pages || (mapp->flags & PF_W) != 0) {
+            mapp->write_size = mapp->end_address - mapp->start_address;
+          } else if (!is_anonymous
+                     && mapp->offset == 0 && mapp->flags & PF_R
+                     && ((char*)mapp->start_address)[0] == ELFMAG0
+                     && ((char*)mapp->start_address)[1] == ELFMAG1
+                     && ((char*)mapp->start_address)[2] == ELFMAG2
+                     && ((char*)mapp->start_address)[3] == ELFMAG3) {
+            mapp->write_size = pagesize;
           }
 
-          /* Remove mapping, if it was not readable, or completely zero
-           * anyway. The former is usually the case of stack guard pages, and
-           * the latter occasionally happens for unused memory.
-           * Also, be careful not to touch mapped devices.
-           */
-          if ((mappings[i].flags & PF_R) == 0 ||
-              mappings[i].start_address == mappings[i].end_address ||
-              is_device) {
-            num_mappings--;
-          } else {
-            i++;
-          }
+          /* Keep this mapping.                                              */
+          ++mapp;
         }
         NO_INTR(sys_close(io.fd));
 
+        num_mappings = endmap - mappings;
+
         if (vdso.address) {
           /* Sanity checks.                                                  */
-          for (i = 0; i < num_mappings; i++) {
-            size_t start = mappings[i].start_address;
-            size_t end   = mappings[i].end_address;
-            if ((mappings[i].flags & PF_R) &&
+          const struct mapping *mapp;
+          for (mapp = mappings; mapp < endmap; ++mapp) {
+            size_t start = mapp->start_address;
+            size_t end   = mapp->end_address;
+            if ((mapp->flags & PF_R) &&
                 start <= vdso.address && vdso.address < end) {
               vdso.ehdr = SanitizeVDSO(vdso.ehdr, start, end);
               break;
             }
           }
-          if (i == num_mappings) {
+          if (mapp == endmap) {
             /* Did not find a mapping "covering" vdso.
              * Something goofy is going on; will not dump it.
              */
@@ -1065,7 +1076,7 @@ static int CreateElfCore(void *handle,
              * in fs/binfmt_elf.c does on platforms that have vdso.
              */
             Phdr *vdso_phdr = (Phdr *)(vdso.address + vdso.ehdr->e_phoff);
-            for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+            for (uint16_t i = 0; i < vdso.ehdr->e_phnum; i++) {
               if (vdso_phdr[i].p_type == PT_LOAD) {
                 /* This will be written as "normal" mapping                  */
               } else {
@@ -1111,7 +1122,7 @@ static int CreateElfCore(void *handle,
           }
           #endif
           /* Calculate how much space the extra notes will take.             */
-          for (i = 0; i < extra_notes_count; i++) {
+          for (int i = 0; i < extra_notes_count; i++) {
             size_t name_size;
             name_size = strlen(extra_notes[i].name) + 1;
             filesz += sizeof(Nhdr) +
@@ -1160,7 +1171,7 @@ static int CreateElfCore(void *handle,
             size_t vdso_size = 0;
             if (vdso.address) {
               Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
-              for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+              for (uint16_t i = 0; i < vdso.ehdr->e_phnum; i++) {
                 Phdr *p = vdso_phdr+i;
                 if (p->p_type != PT_LOAD) {
                    vdso_size += p->p_filesz;
@@ -1171,57 +1182,55 @@ static int CreateElfCore(void *handle,
             /* Loops while there isn't enough space for all the mappings. Each
              * iteration, the largest mapping will be reduced in size.
              */
-            for (;;) {
-              int largest = -1;
+            while (1) {
+              struct mapping *largest = NULL;
               size_t total_core_size = offset + filesz + vdso_size;
               /* Get the largest and total size of the core dump.            */
-              for (i = 0; i < num_mappings; i++) {
-                total_core_size += mappings[i].write_size;
-                if (largest < 0 ||
-                    mappings[largest].write_size < mappings[i].write_size) {
-                  largest = i;
+              for (struct mapping *mapp = mappings; mapp < endmap; ++mapp) {
+                total_core_size += mapp->write_size;
+                if (!largest || largest->write_size < mapp->write_size) {
+                  largest = mapp;
                 }
               }
               /* If the total size of all the maps is more than our file size,
                * we must reduce the size of the largest map.
                */
-              if (largest >= 0 && total_core_size > prioritize_max_length) {
+              if (largest && total_core_size > prioritize_max_length) {
                 size_t space_needed = total_core_size - prioritize_max_length;
                 /* If there is no more space to free in the mappings, we must
                  * stop. The size limit will be preserved since if the
                  * prioritized limiting is enabled, the limited writer will be
                  * used.
                  */
-                if (mappings[largest].write_size > 0) {
-                  if (space_needed > mappings[largest].write_size) {
-                    mappings[largest].write_size = 0;
+                if (largest->write_size > 0) {
+                  if (space_needed > largest->write_size) {
+                    largest->write_size = 0;
                     continue;
-                  } else {
-                    mappings[largest].write_size -= space_needed;
                   }
+                  largest->write_size -= space_needed;
                 }
               }
               break;
             }
           }
 
-          for (i = 0; i < num_mappings; i++) {
+          for (const struct mapping *mapp = mappings; mapp < endmap; ++mapp) {
             offset       += filesz;
-            filesz        = mappings[i].end_address -mappings[i].start_address;
+            filesz        = mapp->end_address - mapp->start_address;
             phdr.p_offset = offset;
-            phdr.p_vaddr  = mappings[i].start_address;
+            phdr.p_vaddr  = mapp->start_address;
             phdr.p_memsz  = filesz;
 
-            filesz        = mappings[i].write_size;
+            filesz        = mapp->write_size;
             phdr.p_filesz = filesz;
-            phdr.p_flags  = mappings[i].flags & PF_MASK;
+            phdr.p_flags  = mapp->flags & PF_MASK;
             if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
               goto done;
             }
           }
           if (vdso.ehdr) {
             Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
-            for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+            for (uint16_t i = 0; i < vdso.ehdr->e_phnum; i++) {
               if (vdso_phdr[i].p_type != PT_LOAD) {
                 memcpy(&phdr, vdso_phdr+i, sizeof(Phdr));
                 offset       += filesz;
@@ -1263,7 +1272,7 @@ static int CreateElfCore(void *handle,
              * kernel code in fs/binfmt_elf.c does.
              * Without this, gdb can't unwind through vdso on i686.
              */
-            int fd, i;
+            int fd;
             NO_INTR(fd = sys_open("/proc/self/auxv", O_RDONLY, 0));
             if (fd == -1) {
               goto done;
@@ -1275,7 +1284,7 @@ static int CreateElfCore(void *handle,
               NO_INTR(sys_close(fd));
               goto done;
             }
-            for (i = 0; i < num_auxv; ++i) {
+            for (size_t i = 0; i < num_auxv; ++i) {
               ssize_t nread;
               auxv_t auxv;
               NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
@@ -1294,7 +1303,7 @@ static int CreateElfCore(void *handle,
            * Make it easier for the end-user to find crashing thread
            * by dumping it first.
            */
-          for (i = num_threads; i-- > 0; ) {
+          for (int i = num_threads; i-- > 0; ) {
             if (pids[i] == main_pid) {
               if (WriteThreadRegs(handle, writer, prstatus, pids[i],
                                   regs+i, fpregs+i, fpxregs+i)) {
@@ -1303,7 +1312,7 @@ static int CreateElfCore(void *handle,
               break;
             }
           }
-          for (i = num_threads; i-- > 0; ) {
+          for (int i = num_threads; i-- > 0; ) {
             if (pids[i] != main_pid) {
               if (WriteThreadRegs(handle, writer, prstatus, pids[i],
                                   regs+i, fpregs+i, fpxregs+i)) {
@@ -1313,7 +1322,7 @@ static int CreateElfCore(void *handle,
           }
 
           /* Write user provided notes                                       */
-          for (i = 0; i < extra_notes_count; i++) {
+          for (int i = 0; i < extra_notes_count; i++) {
             size_t name_align = 0, description_align = 0;
             const char scratch[3] = {0,0,0};
             nhdr.n_namesz = strlen(extra_notes[i].name)+1;
@@ -1360,17 +1369,16 @@ static int CreateElfCore(void *handle,
         }
 
         /* Write all memory segments                                         */
-        for (i = 0; i < num_mappings; i++) {
-          if (mappings[i].write_size > 0 &&
-              writer(handle, (void *)mappings[i].start_address,
-                     mappings[i].write_size) != mappings[i].write_size) {
+        for (const struct mapping *mapp = mappings; mapp < endmap; ++mapp) {
+          const size_t size = mapp->write_size;
+          if (size && writer(handle, (void *)mapp->start_address, size) != size) {
             goto done;
           }
         }
         if (vdso.address) {
           /* Finally write the contents of Phdrs that "belong" to vdso.      */
           Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
-          for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+          for (uint16_t i = 0; i < vdso.ehdr->e_phnum; i++) {
             Phdr *p = vdso_phdr+i;
             if (p->p_type == PT_LOAD) {
               /* This segment has already been dumped, because it is one of
@@ -1443,7 +1451,6 @@ static int CreatePipelineChild(void *void_arg) {
     #endif
 
     struct CreateArgs *args = (struct CreateArgs *)void_arg;
-    int i;
 
     /* Use pipe to tell parent about the compressor that we chose.
      * Make sure the file handle for the write-end of the pipe is
@@ -1475,7 +1482,7 @@ static int CreatePipelineChild(void *void_arg) {
      * pipe to the parent. This also takes care of all the filehandles
      * that we temporarily created by calling sys_dup().
      */
-    for (i = 3; i < args->openmax; i++)
+    for (int i = 3; i < args->openmax; i++)
       if (i != args->fds[1])
         MY_NO_INTR(sys0_close(i));
 
@@ -1499,24 +1506,24 @@ static int CreatePipelineChild(void *void_arg) {
               &ERRNO);
       if (strchr(compressor, '/')) {
         /* Absolute or relative path precedes name of executable             */
-        sys0_execve(compressor, cmd_args, (const char * const *)environ);
+        sys0_execve(compressor, cmd_args, (const char *const *)environ);
       } else {
         /* Search for executable along PATH variable                         */
         const char *ptr = args->PATH;
         if (ptr != NULL) {
-          for (;;) {
+          while (1) {
             const char *end = ptr;
             while (*end && *end != ':') end++;
             if (ptr == end) {
               /* Found current directory in PATH                             */
-              sys0_execve(compressor, cmd_args, (const char * const *)environ);
+              sys0_execve(compressor, cmd_args, (const char *const *)environ);
             } else {
               /* Compute new file name                                       */
               char executable[strlen(compressor) + (end - ptr) + 2];
               memcpy(executable, ptr, end-ptr);
               executable[end - ptr] = '/';
               strcpy(executable + (end - ptr + 1), compressor);
-              sys0_execve(executable, cmd_args, (const char * const *)environ);
+              sys0_execve(executable, cmd_args, (const char *const *)environ);
             }
             if (!*end)
               break;
@@ -1724,7 +1731,6 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                         const char *file_name,
                         const char *PATH
                       */) {
-  long             i;
   int              rc = -1, fd = -1, threads = num_threads, hasSSE = 1;
   struct core_user user, *puser = &user;
   prpsinfo         prpsinfo;
@@ -1754,7 +1760,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 
   /* Threads are already attached, read their registers now                  */
 #ifdef THREADS
-  for (i = 0; i < threads; i++) {
+  for (int i = 0; i < threads; i++) {
     char scratch[4096];
     #if defined(__mips__)
     /* MIPS kernels do not support PTRACE_GETREGS, instead we have to call
@@ -1770,8 +1776,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
       14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
       67, 68, 64, 66, 69, 65, -1 };
-    int j;
-    for (j = 0; j < sizeof(struct regs)/sizeof(long); j++) {
+    for (int j = 0; j < sizeof(struct regs)/sizeof(long); j++) {
       if (map[j] >= 0 &&
           sys_ptrace(PTRACE_PEEKUSER, pids[i], (void *)map[j],
                      (unsigned long *)(thread_regs + i) + j)) {
@@ -1785,7 +1790,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
      * "struct fpregs" that expands all 32bit variables to 64bits.
      */
     memset(thread_fpregs + i, 0xFF, sizeof(struct fpregs));
-    for (j = 0; j < 32; j++) {
+    for (long j = 0; j < 32; j++) {
       if (sys_ptrace(PTRACE_PEEKUSER, pids[i], (void *)(32 + j),
                      (uint64_t *)(thread_fpregs + i) + j)) {
         ResumeAllProcessThreads(threads, pids);
@@ -1867,7 +1872,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   /* Get parent's CPU registers, and user data structure                     */
   {
     #ifndef __mips__
-    for (i = 0; i < sizeof(struct core_user); i += sizeof(int)) {
+    for (long i = 0; i < sizeof(struct core_user); i += sizeof(int)) {
       sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
                  ((char *)&user) + i);
     }
@@ -1898,7 +1903,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     memset(&scratch, 0, sizeof(scratch));
     size = sys_readlink("/proc/self/exe", scratch, sizeof(scratch));
     len = 0;
-    for (ptr = cmd; *ptr != '\000' && size-- > 0; ptr++) {
+    for (char *ptr = cmd; *ptr != '\000' && size-- > 0; ptr++) {
       if (*ptr == '/') {
         cmd = ptr+1;
         len = 0;
@@ -1912,7 +1917,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
       char *ptr;
       ssize_t size = c_read(cmd_fd, &prpsinfo.pr_psargs,
                             sizeof(prpsinfo.pr_psargs), &errno);
-      for (ptr = prpsinfo.pr_psargs; size-- > 0; ptr++)
+      for (char *ptr = prpsinfo.pr_psargs; size-- > 0; ptr++)
         if (*ptr == '\000')
           *ptr = ' ';
       NO_INTR(sys_close(cmd_fd));
@@ -1938,7 +1943,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         scratch[size] = '\000';
 
         /* User time                                                         */
-        for (i = 13; i && *ptr; ptr++) if (*ptr == ' ') i--;
+        for (int i = 13; i && *ptr; ptr++) if (*ptr == ' ') i--;
         tms = 0;
         while (*ptr && *ptr != ' ') tms = 10*tms + *ptr++ - '0';
         prstatus.pr_utime.tv_sec  = tms / 1000;
@@ -1966,7 +1971,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         prstatus.pr_cstime.tv_usec = (tms % 1000) * 1000;
 
         /* Pending signals                                                   */
-        for (i = 14; i && *ptr; ptr++) if (*ptr == ' ') i--;
+        for (int i = 14; i && *ptr; ptr++) if (*ptr == ' ') i--;
         while (*ptr && *ptr != ' ')
           prstatus.pr_sigpend = 10*prstatus.pr_sigpend + *ptr++ - '0';
 
@@ -2086,7 +2091,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
           }
 
           /* Close all file handles other than the write end of our pipe     */
-          for (i = 0; i < openmax; i++) {
+          for (int i = 0; i < openmax; i++) {
             if (i != fds[1]) {
               NO_INTR(sys_close(i)); }
           }
@@ -2127,7 +2132,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
           char cmsg_buf[CMSG_SPACE(sizeof(int))];
           struct kernel_iovec  iov;
           struct kernel_msghdr msg;
-          for (;;) {
+          while (1) {
             int nbytes;
             memset(&iov, 0, sizeof(iov));
             memset(&msg, 0, sizeof(msg));
