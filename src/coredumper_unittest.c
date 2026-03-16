@@ -33,6 +33,7 @@
 
 #define __STDC_LIMIT_MACROS
 #include <assert.h>
+#include <stdarg.h>
 #include <bits/wordsize.h>
 #include <endian.h>
 #include <errno.h>
@@ -53,20 +54,45 @@
 #include "google/coredumper.h"
 #include "linuxthreads.h"
 
-/* The gdb binary to use on different architectures. Change these if you have
- * specific debuggers for different architectures.
- */
-#if __WORDSIZE == 64
-#define GDB "gdb"
-#else
-#define GDB "gdb"
-#endif
-
 /* A simple structure to store memory segment information.                   */
 struct MemorySegment {
   size_t filesz;
   size_t memsz;
 };
+
+#ifdef __GNUC__
+#define ASSERT(_cond, _fmt, ...)                                        \
+  if (!(_cond)) ut_assert(__FILE__, __LINE__, __PRETTY_FUNCTION__,      \
+                          #_cond, _fmt, ##__VA_ARGS__)
+
+static void ut_assert(const char *filenm, uint64_t lineno, const char *func,
+                      const char *condition, const char *fmt, ...)
+{
+  FILE* out = stdout;
+  va_list args;
+  va_start(args, fmt);
+
+  fprintf(out, "%s:%lu: %s: Assertion '%s' failed: ", filenm, lineno, func, condition);
+  vfprintf(out, fmt, args);
+  va_end(args);
+  fputc('\n', out);
+  abort();
+}
+#else
+#define ASSERT(_cond, ...)  assert(_cond)
+#endif
+
+static void info(const char *fmt, ...)
+{
+  FILE* out = stdout;
+  va_list args;
+
+  fputs("|| ", out);
+  va_start(args, fmt);
+  vfprintf(out, fmt, args);
+  va_end(args);
+  fputc('\n', out);
+}
 
 /* A comparator function to compare to memory segments based on their memsz in
  * descending order. If two segments have the same memsz, their filesz values
@@ -95,15 +121,10 @@ static struct CoredumperNote extra_notes[] = {
   };
 static const int kExtraNotesCount = 4;
 
-static const char* getReadelf()
+static const char* getEnvVar(const char *varname, const char *defval)
 {
-  static const char *readelf = NULL;
-  if (!readelf) {
-    readelf = getenv("READELF");
-    if (!readelf)
-      readelf = "readelf";
-  }
-  return readelf;
+  const char *var = getenv(varname);
+  return var && var[0] != '\0' ? var : defval;
 }
 
 /* Make assertion failures print more readable messages                      */
@@ -179,31 +200,31 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
    */
   int  rc = fprintf(input,
                     "cat /proc/%d/maps &&"
-                    "%s %s <\"%s%s\" >core.%d &&"
-                    "%s -a core.%d 2>/dev/null; "
-                    "rm -f core.%d; "
-                    "(set +x; echo DONE)\n",
-                    getpid(), decompress, args, filename, suffix,
-                    getpid(), getReadelf(),
-                    getpid(), getpid());
-  assert(rc > 0);
+                    " %s %s <\"%s%s\" >core.%d &&"
+                    " %s -a core.%d 2>/dev/null;"
+                    " rm -f core.%d;"
+                    " (set +x; echo DONE)\n",
+                    getpid(),
+                    decompress, args, filename, suffix, getpid(),
+                    getEnvVar("READELF", "readelf"), getpid(),
+                    getpid());
+  ASSERT(rc > 0, "rc = %d", rc);
 
   *buffer = '\000';
   for (ptr = msg; *ptr; ptr++) {
     do {
       char *line;
-      assert(strncmp(buffer, "DONE", 4));
+      ASSERT(strncmp(buffer, "DONE", 4), "buffer = %s", buffer);
       line = fgets(buffer, sizeof(buffer), output);
-      assert(line);
+      ASSERT(line, "line = %s", line);
       fputs(buffer, stdout);
     } while (!strstr(buffer, *ptr));
-    printf("Found: %s\n", *ptr);
+    info("Found: %s", *ptr);
   }
   return;
 }
 
-/* Skips leading white space within a string
- */
+/* Skips leading white space within a string */
 static char *SkipLeadingWhiteSpace(char *line) {
   while (isspace(*line) && *line != '\0') {
     line++;
@@ -241,11 +262,12 @@ static void CheckPrioritizationWithReadElf(FILE *input, FILE *output,
   char *line;
   char buffer[4096];
   int last_line_was_load;
-  int  rc = fprintf(input, "%s -a %s; echo DONE\n", getReadelf(), filename);
+  int  rc = fprintf(input, "%s -a %s; echo DONE\n",
+                    getEnvVar("READELF", "readelf"), filename);
   const int kMaxMemorySegments = 256;
   struct MemorySegment memory_segments[kMaxMemorySegments];
   int memory_segment_count = 0;
-  assert(rc > 0);
+  ASSERT(rc > 0, "rc = %d", rc);
 
   *buffer = '\000';
 
@@ -266,7 +288,8 @@ static void CheckPrioritizationWithReadElf(FILE *input, FILE *output,
       } else if (last_line_was_load) {
         last_line_was_load = 0;
         line = SkipLeadingWhiteSpace(line);
-        assert(memory_segment_count < kMaxMemorySegments);
+        ASSERT(memory_segment_count < kMaxMemorySegments,
+               "count=%d max=%d", memory_segment_count, kMaxMemorySegments);
         memory_segments[memory_segment_count].filesz =
           hextosizet(line, &line);
         memory_segments[memory_segment_count].memsz =
@@ -295,7 +318,8 @@ static void CheckPrioritizationWithReadElf(FILE *input, FILE *output,
     size_t current_size_difference =
       memory_segments[i].memsz - memory_segments[i].filesz;
     if (i > 0) {
-      assert(last_size_difference >= current_size_difference);
+      ASSERT(last_size_difference >= current_size_difference,
+             "last=%lu current=%lu", last_size_difference, current_size_difference);
     }
     last_size_difference = current_size_difference;
   }
@@ -319,9 +343,10 @@ static void CheckExtraNotesWithReadElf(FILE *input, FILE *output,
   int offset = 0;
   int note_sizes[kExtraNotesCount];
   int note_sizes_to_description[kExtraNotesCount];
-  int rc = fprintf(input, "%s -n %s; echo DONE\n", getReadelf(), filename);
+  int rc = fprintf(input, "%s -n %s; echo DONE\n",
+                   getEnvVar("READELF", "readelf"), filename);
 
-  assert(rc > 0);
+  ASSERT(rc > 0, "rc = %d", rc);
 
   *buffer = '\000';
   /* Read the output from readelf and check the values are correct.          */
@@ -344,7 +369,7 @@ static void CheckExtraNotesWithReadElf(FILE *input, FILE *output,
           offset = hextosizet(line, &line);
           /* Skip the line which contains the table headings.                */
           char *o = fgets(buffer, sizeof(buffer), output);
-          assert(o != NULL);
+          ASSERT(o != NULL, "no table heading");
         }
       } else if (line[0] != '+') {
         /* Get the name, its size and the description size.                  */
@@ -376,48 +401,56 @@ static void CheckExtraNotesWithReadElf(FILE *input, FILE *output,
           note_size += 4 - description_size % 4;
         }
 
-        assert(note_index < kExtraNotesCount);
+        ASSERT(note_index < kExtraNotesCount, "index=%d", note_index);
         struct CoredumperNote *note = &extra_notes[note_index];
         if (!strcmp(name, note->name)) {
-          assert(description_size == note->description_size);
+          ASSERT(description_size == note->description_size,
+                 "name=%s desc=%d note=%u",
+                 name, description_size, note->description_size);
           line = SkipLeadingWhiteSpace(line);
           /* Expect readelf to not recognize our note types.                 */
-          assert(!strncmp(line, "Unknown note type: (", 20));
+          ASSERT(!strncmp(line, "Unknown note type: (", 20),
+                 "name=%s line=%s", name, line);
           line += 20;
 
           unsigned int type = hextosizet(line, &line);
-          assert(type == note->type);
+          ASSERT(type == note->type,
+                 "name=%s type=%u note=%u", name, type, note->type);
 
           note_sizes[note_index] = note_size;
           note_sizes_to_description[note_index] = note_size_to_description;
           note_index++;
         } else if (note_index == 0) {
           /* The custom notes must follow the core notes.                    */
-          assert(!strcmp(name, "CORE") || !strcmp(name, "LINUX"));
+          ASSERT(!strcmp(name, "CORE") || !strcmp(name, "LINUX"),
+                 "name=%s", name);
           offset += note_size;
         }
       }
     }
   } while (line);
-  assert(note_index == kExtraNotesCount);
+  ASSERT(note_index == kExtraNotesCount,
+         "index=%d count=%d", note_index, kExtraNotesCount);
 
   /* Check the note descriptions.                                            */
   FILE *fp = fopen(filename, "rb");
-  assert(fp);
+  ASSERT(fp, "open %s failed", filename);
 
-  assert(!fseek(fp, offset, SEEK_SET));
+  ASSERT(!fseek(fp, offset, SEEK_SET), "offset=%d", offset);
   int i;
   for (i = 0; i < kExtraNotesCount; ++i) {
     struct CoredumperNote *note = &extra_notes[i];
-    assert(fread(buffer, 1, note_sizes[i], fp) == note_sizes[i]);
+    ASSERT(fread(buffer, 1, note_sizes[i], fp) == note_sizes[i],
+           "buffer=%s size=%d", buffer, note_sizes[i]);
     if (note->description_size > 0) {
       line = &buffer[note_sizes_to_description[i]];
-      assert(!strncmp(line, (const char*)note->description,
-                     note->description_size));
+      ASSERT(!strncmp(line, (const char*)note->description,
+                      note->description_size),
+             "line=%s descr=%s", line, note->description);
     }
   }
 
-  assert(!fclose(fp));
+  ASSERT(!fclose(fp), "close file %s", filename);
 
 
   return;
@@ -486,7 +519,7 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
           "thread apply all bt 10\n"
 #endif
           "quit\n",
-          GDB,
+          getEnvVar("GDB", "gdb"),
           getpid(), filename,
           (unsigned long)dummy, *dummy, cmp);
 
@@ -501,7 +534,7 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
   sigaction(SIGALRM, &sa, 0);
 
   if (setjmp(jmpenv)) {
-    puts("Time out!");
+    info("Time out!");
     abort();
   } else {
     *buffer = '\000';
@@ -511,7 +544,7 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
        */
       while (*out_ptr && *out_ptr != '@') {
         int rc = putc(*out_ptr++, input);
-        assert(rc >= 0);
+        ASSERT(rc >= 0, "rc = %d", rc);
       }
       fflush(input);
       for (;;) {
@@ -520,13 +553,13 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
         /* We should never try to read any more messages, after we have
          * already seen the final "DONE" message.
          */
-        assert(strncmp(buffer, "DONE", 4));
+        ASSERT(strncmp(buffer, "DONE", 4), "buffer=%s", buffer);
 
         /* Read the next message from gdb.                                   */
         alarm(20);
         line = fgets(buffer, sizeof(buffer), output);
         alarm(0);
-        assert(line);
+        ASSERT(line, "buffer=%s", buffer);
         fputs(buffer, stdout);
 
         /* Extract the "$1 =" string, which we will compare later.           */
@@ -574,7 +607,7 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
       }
     found:
       /* Print matched pattern. Enter arg into command stream. Then loop.    */
-      printf("Found: %s", *ptr);
+      info("Found: %s", *ptr);
       if (arg && *out_ptr == '@') {
         /* We only want to match the very last word; drop leading tokens.    */
         int rc;
@@ -583,16 +616,15 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
 
         /* Enter matched data into the command stream.                       */
         rc = fputs(arg, input);
-        assert(rc > 0);
-        printf(" (arg = \"%s\")", arg);
+        ASSERT(rc > 0, "rc=%d", rc);
+        info(" (arg = \"%s\")", arg);
         arg = 0;
         out_ptr++;
       }
-      puts("");
     }
 
-    assert(*dummy == cmp);
-    printf("Magic marker matches %d\n", *dummy);
+    ASSERT(*dummy == cmp, "*dummy=%d cmp=%d", *dummy, cmp);
+    info("Magic marker matches %d", *dummy);
   }
 }
 
@@ -676,7 +708,8 @@ static int MyWriteCoreDump(const char *file_name) {
 static int MyWriteCoreDumpLimited(const char *file_name, size_t max_length) {
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);
-  assert(!SetCoreDumpLimited(&params, max_length));
+  ASSERT(!SetCoreDumpLimited(&params, max_length),
+         "flags=%d max=%lu", params.flags, max_length);
   return MyWriteCoreDumpWith(&params, file_name);
 }
 
@@ -686,8 +719,10 @@ static int MyWriteCompressedCoreDump(
     struct CoredumperCompressor **selected_compressor){
   struct CoreDumpParameters params;
   ClearCoreDumpParameters(&params);
-  assert(!SetCoreDumpLimited(&params, max_length));
-  assert(!SetCoreDumpCompressed(&params, compressors, selected_compressor));
+  ASSERT(!SetCoreDumpLimited(&params, max_length),
+         "flags=%d max=%lu", params.flags, max_length);
+  ASSERT(!SetCoreDumpCompressed(&params, compressors, selected_compressor),
+         "flags=%d", params.flags);
   return MyWriteCoreDumpWith(&params, file_name);
 }
 
@@ -727,9 +762,9 @@ void TestCoreDump() {
    * application. To simplify this problem, we fork and exec /bin/bash before
    * creating the first thread.
    */
-  puts("Forking /bin/bash process");
-  rc = pipe(in);  assert(!rc);
-  rc = pipe(out); assert(!rc);
+  info("Forking /bin/bash process");
+  rc = pipe(in);  ASSERT(!rc, "rc=%d", rc);
+  rc = pipe(out); ASSERT(!rc, "rc=%d", rc);
 
   if ((pid = fork()) == 0) {
     int i, openmax;
@@ -745,9 +780,9 @@ void TestCoreDump() {
     execl("/bin/bash", "bash", "-ex", NULL);
     _exit(1);
   }
-  assert(pid >= 0);
-  assert(!close(in[0]));
-  assert(!close(out[1]));
+  ASSERT(pid >= 0, "pid=%d", pid);
+  ASSERT(!close(in[0]), "close in");
+  ASSERT(!close(out[1]), "close out");
   input  = fdopen(in[1], "w");
   output = fdopen(out[0], "r");
   setvbuf(input, NULL, _IONBF, 0);
@@ -765,7 +800,7 @@ void TestCoreDump() {
    * system calls. So, they are busy looping and checking a volatile
    * state variable, instead.
    */
-  puts("Starting threads");
+  info("Starting threads");
   pthread_create(&thread, 0, Busy, (void *)&state1);
   pthread_create(&thread, 0, Busy, (void *)&state2);
   while (state1 != RUNNING || state2 != RUNNING) {
@@ -776,110 +811,113 @@ void TestCoreDump() {
   const char *core_test_gz = "core-test.gz";
   for (loop = 0; loop < 2; loop++) {
     /* Prepare to create a core dump for the current process                 */
-    printf("loop %d: Writing core file to \"%s\"\n", loop, core_test);
+    info("loop %d: Writing core file to \"%s\"", loop, core_test);
     unlink(core_test);
 
     /* Check whether limits work correctly                                   */
-    puts("Check whether limits work correctly");
+    info("Check whether limits work correctly");
     rc = (loop ? MyWriteCoreDumpLimited : WriteCoreDumpLimited)(
            core_test, 0);
-    assert(!rc);
-    assert(stat(core_test, &statBuf) < 0);
+    ASSERT(!rc, "rc=%d", rc);
+    ASSERT(stat(core_test, &statBuf) < 0, "stat=%s", core_test);
     rc = (loop ? MyWriteCoreDumpLimited : WriteCoreDumpLimited)(
            core_test, 256);
-    assert(!rc);
-    assert(!stat(core_test, &statBuf));
-    assert(statBuf.st_size == 256);
-    assert(!unlink(core_test));
+    ASSERT(!rc, "rc=%d", rc);
+    ASSERT(!stat(core_test, &statBuf), "stat=%s", core_test);
+    ASSERT(statBuf.st_size == 256, "size=%ld", statBuf.st_size);
+    ASSERT(!unlink(core_test), "unlink=%s", core_test);
 
     /* Check whether prioritized limiting works correctly                    */
     if (loop) {
-      puts("Checking priority limited core files of size 0");
+      info("Checking priority limited core files of size 0");
       rc = WriteCoreDumpLimitedByPriority(core_test, 0);
-      assert(!rc);
-      assert(stat(core_test, &statBuf) < 0);
-      puts("Checking priority limited core files of size 256. "
+      ASSERT(!rc, "rc=%d", rc);
+      ASSERT(stat(core_test, &statBuf) < 0, "stat=%s", core_test);
+      info("Checking priority limited core files of size 256. "
            "This should truncate the header.");
       rc = WriteCoreDumpLimitedByPriority(core_test, 256);
-      assert(!rc);
-      assert(!stat(core_test, &statBuf));
-      assert(statBuf.st_size == 256);
-      puts("Checking priority limited core files of size 60000. "
+      ASSERT(!rc, "rc=%d", rc);
+      ASSERT(!stat(core_test, &statBuf), "stat=%s", core_test);
+      ASSERT(statBuf.st_size == 256, "size=%ld", statBuf.st_size);
+      info("Checking priority limited core files of size 60000. "
            "This will include a couple of complete segments as well as "
            "an incomplete segment.");
       rc = WriteCoreDumpLimitedByPriority(core_test, 60000);
-      assert(!rc);
-      assert(!stat(core_test, &statBuf));
-      assert(statBuf.st_size == 60000);
+      ASSERT(!rc, "rc=%d", rc);
+      ASSERT(!stat(core_test, &statBuf), "stat=%s", core_test);
+      ASSERT(statBuf.st_size == 60000, "size=%ld", statBuf.st_size);
       CheckWithReadElf(input, output, core_test, "", "cat", "");
       CheckPrioritizationWithReadElf(input, output, core_test);
-      assert(!unlink(core_test));
+      ASSERT(!unlink(core_test), "unlink=%s", core_test);
     }
 
-    /* Check wether compression works                                        */
-    puts("Checking compressed core files");
+    /* Check whether compression works                                       */
+    info("Checking compressed core files");
     rc = (loop?MyWriteCompressedCoreDump:WriteCompressedCoreDump)
            (core_test, SIZE_MAX, COREDUMPER_GZIP_COMPRESSED,
             &compressor);
-    assert(!rc);
-    assert(compressor);
-    assert(strstr(compressor->compressor, "gzip"));
-    assert(!strcmp(compressor->suffix, ".gz"));
+    ASSERT(!rc, "rc=%d loop=%d", rc, loop);
+    ASSERT(compressor, "no compressor");
+    ASSERT(strstr(compressor->compressor, "gzip"), "compressor=%s", compressor->compressor);
+    ASSERT(!strcmp(compressor->suffix, ".gz"), "suffix=%s", compressor->suffix);
     CheckWithReadElf(input, output, core_test, compressor->suffix,
                      compressor->compressor, "-d");
-    assert(!unlink(core_test_gz));
+    ASSERT(!unlink(core_test_gz), "unlink=%s", core_test_gz);
 
     /* Check wether fallback to uncompressed core files works                */
-    puts("Checking fallback to uncompressed core files");
+    info("Checking fallback to uncompressed core files");
     my_compressor[1].compressor = NULL; /* Disable uncompressed files        */
     rc = (loop?MyWriteCompressedCoreDump:WriteCompressedCoreDump)
            (core_test, SIZE_MAX, my_compressor, &compressor);
-    assert(rc);
-    assert(!compressor->compressor);
+    ASSERT(rc, "rc=%d loop=%d", rc, loop);
+    ASSERT(!compressor->compressor, "compressor");
     my_compressor[1].compressor = ""; /* Enable uncompressed files           */
     rc = (loop?MyWriteCompressedCoreDump:WriteCompressedCoreDump)
            (core_test, SIZE_MAX, my_compressor, &compressor);
-    assert(!rc);
-    assert(compressor->compressor);
-    assert(!*compressor->compressor);
+    ASSERT(!rc, "rc=%d loop=%d", rc, loop);
+    ASSERT(compressor->compressor, "no compressor");
+    ASSERT(!*compressor->compressor, "empty compressor");
     CheckWithReadElf(input, output, core_test, "", "cat", "");
-    assert(!unlink(core_test));
+    ASSERT(!unlink(core_test), "unlink=%s", core_test);
 
     /* Check if additional notes are written correctly to the core file      */
-    puts("Checking extra notes in core files");
+    info("Checking extra notes in core files");
     ClearCoreDumpParameters(&note_params);
-    assert(!SetCoreDumpNotes(&note_params, extra_notes, kExtraNotesCount));
-    assert(!SetCoreDumpLimited(&note_params, 0x10000));
+    ASSERT(!SetCoreDumpNotes(&note_params, extra_notes, kExtraNotesCount),
+           "flags=%d", note_params.flags);
+    ASSERT(!SetCoreDumpLimited(&note_params, 0x10000),
+           "flags=%d", note_params.flags);
     rc = (loop?MyWriteCoreDumpWith:WriteCoreDumpWith)
           (&note_params, core_test);
-    assert(!rc);
+    ASSERT(!rc, "rc=%d loop=%d", rc, loop);
     CheckWithReadElf(input, output, core_test, "", "cat", "");
     CheckExtraNotesWithReadElf(input, output, core_test);
-    assert(!unlink(core_test));
+    ASSERT(!unlink(core_test), "unlink=%s", core_test);
 
     /* Check callback function handling                                      */
-    puts("Checking callback functions");
+    info("Checking callback functions");
     ClearCoreDumpParameters(&note_params);
     int count = 0;
-    assert(!SetCoreDumpCallback(&note_params, MyCallback, &count));
-    assert(!SetCoreDumpLimited(&note_params, 0x10000));
+    ASSERT(!SetCoreDumpCallback(&note_params, MyCallback, &count), "flags=%d", note_params.flags);
+    ASSERT(!SetCoreDumpLimited(&note_params, 0x10000), "flags=%d", note_params.flags);
     rc = (loop?MyWriteCoreDumpWith:WriteCoreDumpWith)
           (&note_params, core_test);
-    assert(!rc);
+    ASSERT(!rc, "rc=%d loop=%d", rc, loop);
     CheckWithReadElf(input, output, core_test, "", "cat", "");
-    assert(count == 1);
-    assert(!unlink(core_test));
+    ASSERT(count == 1, "count=%d", count);
+    ASSERT(!unlink(core_test), "unlink=%s", core_test);
     count = -1;
     rc = (loop?MyWriteCoreDumpWith:WriteCoreDumpWith)
           (&note_params, core_test);
-    assert(rc);
-    assert(count == -1);
-    assert(unlink(core_test) == -1 && errno == ENOENT);
+    ASSERT(rc, "rc=%d loop=%d", rc, loop);
+    ASSERT(count == -1, "count=%d", count);
+    ASSERT(unlink(core_test) == -1 && errno == ENOENT,
+           "unlink=%s errno=%d", core_test, errno);
 
     /* Create a full-size core file                                          */
-    puts("Checking uncompressed core files");
+    info("Checking uncompressed core files");
     rc = (loop?MyWriteCoreDump:WriteCoreDump)(core_test);
-    assert(!rc);
+    ASSERT(!rc, "rc=%d loop=%d", rc, loop);
     CheckWithReadElf(input, output, core_test, "", "cat", "");
     CheckWithGDB(input, output, core_test, &dummy, cmp);
 
@@ -887,7 +925,7 @@ void TestCoreDump() {
   }
 
   /* Stop our threads                                                        */
-  puts("Stopping threads");
+  info("Stopping threads");
   state1 = DEAD;
   state2 = DEAD;
 
