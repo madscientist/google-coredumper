@@ -19,10 +19,8 @@ The "examples" directory shows how to add a core file feature to an
 existing TFTP server. For an example of how to use on-disk core files,
 take a look at "src/coredump_unittest.c".
 
-The code has been tested on Linux x86/32, x86/64, and ARM. It is
-distributed from http://code.google.com/p/google-coredumper. It is
-available as a tar source archive, and in prebuilt form as Debian and
-RedHat packages.
+The library has been tested on Linux x86_64 and ARM 64.
+The code is available from GitHub.
 
 For detailed information on how to build and install this library,
 read the "INSTALL" file.

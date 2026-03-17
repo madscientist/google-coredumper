@@ -1,0 +1,57 @@
+                                                                     -*-Text-*-
+
+Google userspace coredumper library
+
+Version 1.4 (2026-03-17)
+
+  New Features:
+
+  > Generate an NT_FILE note into the generated core file.
+    GDB reads this note and, up to version GDB 17.1, will only retrieve
+    shared libraries from debuginfod if this note exists.
+
+  > Support generating core files on 64bit ARM systems.
+
+  > Dump the first page of ELF executable/library mappings.
+    Change from: Romain Geissler <romain.geissler@amadeus.com>
+
+  Bug fixes:
+  * Cope with the removal of sys/sysctl.h in recent glibc/kernel.
+    Change from: Romain Geissler <romain.geissler@amadeus.com>
+  * Fix child stack alignment assembly code.
+    Change from: Zsolt Parragi <zsolt.parragi@cancellar.hu>
+  * Align initial stack pointer correctly.
+    Change from: DoctorNoobingstoneIPresume <adder.thief@gmail.com>
+
+  Tests:
+  * Enhance the unittest to generate more information on failure.
+  * Support alternative readelf and gdb via environment variables.
+
+  Other:
+  * Support clangd as an LSP server
+  * Some code cleanup and simplification.
+
+
+Version 1.3.1 (2017-12-16)
+
+  New Features:
+
+  > Add support for a callback invoked after all threads are paused.
+
+
+Version 1.3 (2017-05-20)
+
+  Bug fixes:
+  * Do not try to read vvar memory segments marked VM_DONTDUMP
+  * Do not use sizeof(<VLA>) as it generates the wrong value.
+    Change from: Max Akhmedov <zlobober@users.noreply.github.com>
+  * Support executables built with RELRO.
+    Change from: Romain Geissler <romain.geissler@amadeus.com>
+  * Allow coredumping on systems with YAMA ptrace protection.
+    Change by: Happy Ox
+
+
+Versions 1.0 (2007-02-15) through 1.2.1 (2008-04-04)
+
+  > These versions provided by Google.
+  > See the ChangeLog file
