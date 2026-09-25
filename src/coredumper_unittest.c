@@ -215,9 +215,9 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
   for (ptr = msg; *ptr; ptr++) {
     do {
       char *line;
-      ASSERT(strncmp(buffer, "DONE", 4), "buffer = %s", buffer);
+      ASSERT(strncmp(buffer, "DONE", 4), "waiting for = %s, buffer = %s", *ptr, buffer);
       line = fgets(buffer, sizeof(buffer), output);
-      ASSERT(line, "line = %s", line);
+      ASSERT(line, "could not get line: %d", errno);
       fputs(buffer, stdout);
     } while (!strstr(buffer, *ptr));
     info("Found: %s", *ptr);
