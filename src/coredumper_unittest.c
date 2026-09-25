@@ -174,8 +174,7 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
       ENDIAN_NOTE,
       "UNIX - System V",
       "Core file",
-      "There are no section", /* Different readelf versions show different text */
-
+      "Program Headers",
       "NOTE",
       /* The LLVM readelf does not print this line
       "No version information found in this file",
